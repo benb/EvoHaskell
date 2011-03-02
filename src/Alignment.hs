@@ -16,7 +16,8 @@ parseFasta bs old =  case L.unpack (L.take 1 (head bs)) of
 parseFastaString :: L.ByteString -> ListAlignment
 
 parseFastaString input = quickListAlignment names seqs where 
-                                mydata = parseFasta (L.lines input) []
+                                mydata = sortBy sortX (parseFasta (L.lines input) [])
+                                sortX (a,b) (c,d) = compare a c
                                 names = map fst mydata
                                 seqs = map snd mydata 
 
