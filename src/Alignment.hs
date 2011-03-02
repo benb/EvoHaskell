@@ -52,15 +52,18 @@ numberify aln = map nfy myseqs where
         numberMap i (x:xs) = i : numberMap (i+1) xs
 
 homDist :: ListAlignment -> ListAlignment -> Double
-homDist aln1 aln2 = answer (diff pairs1 pairs2) where
+homDist aln1 aln2 = answer (diff3 pairs1 pairs2) where
         
         answer :: (Int,Int) -> Double
         answer (numPairs,numDiffs) = (fromIntegral numDiffs) / (fromIntegral numPairs)
         
-        pairs :: [[Int]] -> [[(Int,Int)]]
+        pairs :: [[Int]] -> [[[(Int,Int)]]]
         pairs [] = []
-        pairs (x:y:xs) = zip x y : zip y x :  pairs (x:xs)  ++ pairs (y:xs) -- FIXME 
         pairs (x:[]) = []
+        pairs (x:xs) = pairsXY (zip (repeat x) xs) : pairs (xs)
+
+        pairsXY []  = []
+        pairsXY ((a,b):xs) = zip a b : pairsXY xs
 
         pairs1 = pairs (numberify aln1)
         pairs2 = pairs (numberify aln2)
@@ -79,3 +82,8 @@ homDist aln1 aln2 = answer (diff pairs1 pairs2) where
         diff :: [[(Int,Int)]] -> [[(Int,Int)]] -> (Int,Int)
         diff [] [] = (0,0)
         diff (x:xs) (y:ys) = addT (diff2 x y) (diff xs ys)
+
+
+        diff3 :: [[[(Int,Int)]]] -> [[[(Int,Int)]]] -> (Int,Int)
+        diff3 [] [] = (0,0)
+        diff3 (x:xs) (y:ys) = addT (diff x y) (diff3 xs ys)
