@@ -72,9 +72,8 @@ homDist aln1 aln2 = answer (diff3 pairs1 pairs2) where
         addT (a,b) (c,d) = (a+c,b+d)
 
         diff2 :: [(Int,Int)] -> [(Int,Int)] -> (Int,Int)
-        diff2 ((-1,x2):xs) ((-1,y2):ys) = (diff2 xs ys) 
-        diff2 ((-1,x2):xs) y = addT (diff2 xs y) (0,0)
-        diff2 x ((-1,y2):ys) = addT (diff2 x ys) (0,0)
+        diff2 ((x1,x2):xs) y | x1 < 0 = addT (diff2 xs y) (0,0)
+        diff2 x ((y1,y2):ys) | y1 < 0 = addT (diff2 x ys) (0,0)
         diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 && x2==y2 = addT (diff2 xs ys) (1,0)
         diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 = addT (diff2 xs ys) (1,1)
     --    diff2 (x:xs) (y:ys) = diff2 xs ys
