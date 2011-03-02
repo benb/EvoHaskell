@@ -1,0 +1,17 @@
+Name:           MSAMetric
+Version:        0.1
+Cabal-Version:  >= 1.2
+License:        BSD3
+Author:         Benjamin Blackburne
+Build-Type:     Simple
+
+Executable dist
+        Build-Depends: bytestring >= 0.9.1.7, parsec >= 3.1.1, base >= 3
+        Main-Is: Dist.hs
+        HS-Source-Dirs: src
+Executable homdist
+        Main-Is: HomDist.hs
+        HS-Source-Dirs: src
+library
+        Exposed-Modules: Alignment
+        HS-Source-Dirs: src
