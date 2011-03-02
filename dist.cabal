@@ -13,5 +13,5 @@ Executable homdist
         Main-Is: HomDist.hs
         HS-Source-Dirs: src
 library
-        Exposed-Modules: Alignment
+        Exposed-Modules: Alignment, Alignment.Dist
         HS-Source-Dirs: src
