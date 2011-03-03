@@ -6,7 +6,7 @@ Author:         Benjamin Blackburne
 Build-Type:     Simple
 
 Executable dist
-        Build-Depends: bytestring >= 0.9.1.7, parsec >= 3.1.1, base >= 3
+        Build-Depends: bytestring >= 0.9.0.0, base >= 3
         Main-Is: Dist.hs
         HS-Source-Dirs: src
 Executable homdist
