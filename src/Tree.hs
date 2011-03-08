@@ -15,6 +15,12 @@ leaves (Leaf name dist)  = [Leaf name dist]
 leaves (INode fst snd dist) = (leaves fst) ++ (leaves snd)
 leaves (Tree fst snd) = (leaves fst) ++ (leaves snd)
 
+enforceBi :: PNode -> Node
+enforceBi (PLeaf name dist) = Leaf name dist
+enforceBi (PINode (a:b:[]) dist) = INode (enforceBi a) (enforceBi b) dist
+enforceBi (PINode (a:xs) dist) = INode (enforceBi a) (enforceBi $ PINode xs 0.0) dist 
+enforceBi (PTree (a:b:[])) =  Tree (enforceBi a) (enforceBi b)
+enforceBi (PTree (a:xs)) = Tree (enforceBi a) (enforceBi $ PINode xs 0.0)
 
 --parseTree :: Parser Tree
 --parseTree = do {
@@ -41,28 +47,33 @@ number = do s <- getInput
               _         -> empty
             
 
-parseLeaf :: Parser Node
+parseLeaf :: Parser PNode
 parseLeaf = do name <- nodeName
                string ":"
                len <- number
-               return (Leaf name len)
+               return (PLeaf name len)
 
-parseINode :: Parser Node
-parseINode = do (fst,snd) <- parseGenINode 
+parseINode :: Parser PNode
+parseINode = do nodes <- parseGenINode 
                 string ":"
                 len <- number
-                return (INode fst snd len)
+                return (PINode nodes len)
 
-parseTree :: Parser Node
-parseTree = do (fst,snd) <- parseGenINode
+parseTree :: Parser PNode
+parseTree = do nodes <- parseGenINode
+               option "" $ string ":0.0" --RAxML sticks branch lengths on the root...!
                string ";"
-               return (Tree fst snd)
+               return (PTree nodes)
 
-parseGenINode :: Parser (Node,Node)
+parseGenINode :: Parser [PNode]
 parseGenINode = do string "("
                    fst <- try (parseINode) <|> parseLeaf
                    string ","
-                   snd <- try (parseINode) <|> parseLeaf
+                   remainder <- parseNodeList
                    string ")"
-                   return  (fst,snd)
+                   return (fst:remainder)
+
+parseNodeList :: Parser [PNode]
+parseNodeList = sepBy1 (try (parseINode) <|> parseLeaf) (char ',')
+
 

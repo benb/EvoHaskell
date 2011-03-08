@@ -17,7 +17,7 @@ diff dist (x:y:z:xs) = do a <- parseFastaFile x
                           treeStr <- readFile z
                           return (case (parse parseTree "" (treeStr)) of 
                                 Left err -> show err
-                                Right t -> (printf "%.6f" (dist a b)) ++ (show t))
+                                Right t -> (printf "%.6f" (dist a b)) ++ (show (enforceBi t)))
 diff dist x = return "Usage: phydist <fasta1> <fasta2> <tree>"
                         
        
