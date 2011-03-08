@@ -1,7 +1,8 @@
 module Tree where
-import Control.Applicative
 import Text.ParserCombinators.Parsec hiding (many, optional, (<|>))
+import Control.Applicative hiding ((<|>))
 import Text.ParserCombinators.Parsec.Expr
+import Text.ParserCombinators.Parsec.Prim
 import Numeric (readFloat, readHex, readSigned)
 import Text.ParserCombinators.Parsec.Token
 import Text.ParserCombinators.Parsec.Language
@@ -44,7 +45,7 @@ number :: Parser Double
 number = do s <- getInput
             case readSigned readFloat s of
               [(n, s')] -> n <$ setInput s'
-              _         -> empty
+              _         -> fail "empty"
             
 
 parseLeaf :: Parser PNode
