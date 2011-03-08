@@ -29,6 +29,37 @@ type Name = String
 type Sequence = [Char]
 type Column = [Char]
 
+gapPos :: Sequence -> [(Int,Int)]
+gapPos s = gapPos' s [] Nothing 0
+
+absoluteGapPos :: [(Int,Int)] -> [(Int,Int)]
+absoluteGapPos s = map firstTwo (absoluteGapPos' s) where
+                        firstTwo (a,b,c) = (a,b)
+
+absoluteGapPos' :: [(Int,Int)] -> [(Int,Int,Int)]
+absoluteGapPos' [] = [] 
+absoluteGapPos' ((i,j):[]) = (i,j,0):[]
+absoluteGapPos' ((i,j):xs) = (i+myoffset,j,myoffset) : agpTail where
+                                agpTail = absoluteGapPos' xs
+                                offset ((a,b,c):ys) = c + b
+                                myoffset = offset agpTail
+
+
+gapPos' :: Sequence -> [(Int,Int)] -> (Maybe Int) -> Int -> [(Int,Int)]
+--end of sequence
+gapPos' [] list Nothing pos = list 
+gapPos' [] list (Just i) pos = (pos,i):list
+--open a gap
+gapPos' ('-':xs) list Nothing pos = gapPos' xs list (Just 1) (pos) 
+--extend a gap
+gapPos' ('-':xs) list (Just i) pos = gapPos' xs list (Just (i+1)) (pos)
+--close a gap
+gapPos' (x:xs) list (Just i) pos = gapPos' xs ((pos,i):list) Nothing (pos+1)
+--no gap
+gapPos' (x:xs) list Nothing pos = gapPos' xs list Nothing (pos+1)
+
+
+
 data ListAlignment = ListAlignment {names ::  [Name],
                             sequences :: [Sequence],
                             columns :: [Column]} deriving Show
