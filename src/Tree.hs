@@ -12,9 +12,16 @@ data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double |
 data PNode = PLeaf {pname :: String, pdistance :: Double } | PINode [PNode] Double | PTree [PNode] deriving Show
 
 leaves :: Node -> [Node]
-leaves (Leaf name dist)  = [Leaf name dist]
-leaves (INode fst snd dist) = (leaves fst) ++ (leaves snd)
-leaves (Tree fst snd) = (leaves fst) ++ (leaves snd)
+leaves = traverse []
+
+traverse :: [Node] -> Node -> [Node]
+traverse init (INode l r dist) = traverse (traverse init r) l 
+traverse init (Tree l r) = traverse (traverse init r) l 
+traverse init x = x : init
+
+names :: Node -> [String]
+names = map getName . leaves where
+                getName (Leaf name dist) = name
 
 enforceBi :: PNode -> Node
 enforceBi (PLeaf name dist) = Leaf name dist
@@ -77,4 +84,14 @@ parseGenINode = do string "("
 parseNodeList :: Parser [PNode]
 parseNodeList = sepBy1 (try (parseINode) <|> parseLeaf) (char ',')
 
+type Split = ([String],[String])
+
+splits :: Node -> [Split]
+splits = splits' [] []
+
+
+splits' :: [Split] -> [String] -> Node -> [Split]
+splits' init upper (Leaf name dist) =  init
+splits' init upper (INode l r dist) = ((names l) ++ upper,(names r)): ((names r)++upper,(names l)) :  splits' (splits' init ((names r)++upper) l) ((names l)++upper) r
+splits' init upper (Tree l r ) = ((names l),(names r)) :  splits' (splits' init ((names r)++upper) l) ((names l)++upper) r
 
