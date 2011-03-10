@@ -17,6 +17,7 @@ import Alignment
 --
 homDist = genDist numberifyBasic
 homGapDist = genDist numberifyGap
+homTreeDist t = genDist $ numberifyGapTree t
 
 genDist :: (ListAlignment -> [[Int]]) -> ListAlignment -> ListAlignment -> Double
 genDist numF aln1 aln2 = answer (diff3 pairs1 pairs2) where
