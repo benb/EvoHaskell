@@ -17,7 +17,7 @@ import Alignment
 --
 homDist = genDist numberifyBasic
 homGapDist = genDist numberifyGap
-homTreeDist t = tupDist (bodgeTupify $ numberifyGapTree t)
+homTreeDist t = tupDist (numberifyGapTree t)
 
 
 
@@ -30,14 +30,6 @@ tupify f = fmap (map (map toTup)) f where
                         (i,Just i)
                   else 
                         (i,Nothing)
-
---Not sure what best API is - TODO fix this!
-bodgeTupify :: (ListAlignment -> [[Either Int a]]) -> (ListAlignment -> [[(Int,Maybe a)]])
-bodgeTupify f = fmap (map (map toTup)) f where
-        toTup (Right a) = (-1,Just a)
-        toTup (Left i) = (i,Nothing)
-
-
 
 tupDist :: Eq a => (ListAlignment -> [[(Int,Maybe a)]]) -> ListAlignment -> ListAlignment -> Double
 tupDist numF aln1 aln2 = answer (diff3 pairs1 pairs2) where

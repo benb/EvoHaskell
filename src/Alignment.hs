@@ -161,22 +161,22 @@ numberifyGap aln = map nfy myseqs where
         numberMap i ('-':xs) = (-(i+1)) : numberMap i xs
         numberMap i (x:xs) = i : numberMap (i+1) xs
 
-numberifyGapTree :: Node -> ListAlignment -> [[Either Int Node]]
+numberifyGapTree :: Node -> ListAlignment -> [[(Int,Maybe Node)]]
 numberifyGapTree tree aln = transpose $ nfy (columns aln) where
-        nfy :: [Column]  -> [[Either Int Node]]
+        nfy :: [Column]  -> [[(Int, Maybe Node)]]
         nfy colList = numberMap (map (\x->0) (head (columns aln))) colList
-        numberMap :: [Int] -> [Column] -> [[Either Int Node]]
+        numberMap :: [Int] -> [Column] -> [[(Int, Maybe Node)]]
         numberMap y [] = []
         numberMap y (x:xs) = (snd ans) : (numberMap (fst ans) xs) where
                               ans = numberMap' y x $ names aln
                               gapNums = splitsFor tree gapNames
                               gapNames = map (\x-> fst x) $ filter (\t -> (snd t)=='-') $ zip (names aln) x
-                              numberMap':: [Int] -> Column -> [String] -> ([Int],[Either Int Node]) 
+                              numberMap':: [Int] -> Column -> [String] -> ([Int],[(Int,Maybe Node)]) 
                               numberMap' [] [] [] = ([],[])
 
-                              numberMap' (a:as) ('-':bs) (name:cs) = (a:(fst ans2),(Right (getNode name)):(snd ans2)) where
+                              numberMap' (a:as) ('-':bs) (name:cs) = (a:(fst ans2),((-a-1,Just $ getNode name)):(snd ans2)) where
                                                                                              ans2 = numberMap' as bs cs
-                              numberMap' (a:as) (b:bs) (name:cs) = (a+1:(fst ans2),(Left a):(snd ans2)) where
+                              numberMap' (a:as) (b:bs) (name:cs) = (a+1:(fst ans2),(a,Nothing):(snd ans2)) where
                                                                                              ans2 = numberMap' as bs cs
                               getNode::String -> Node
                               getNode name = case (HM.lookup name gapNums) of 
