@@ -6,6 +6,8 @@ import Text.ParserCombinators.Parsec.Prim
 import Numeric (readFloat, readHex, readSigned)
 import Text.ParserCombinators.Parsec.Token
 import Text.ParserCombinators.Parsec.Language
+import qualified Data.HashMap as HM
+import Data.List
 
 data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double | Tree Node Node deriving Show 
 
@@ -84,3 +86,18 @@ splits' init upper (Leaf name dist) =  init
 splits' init upper (INode l r dist) = ((names l) ++ upper,(names r)): ((names r)++upper,(names l)) :  splits' (splits' init ((names r)++upper) l) ((names l)++upper) r
 splits' init upper (Tree l r ) = ((names l),(names r)) :  splits' (splits' init ((names r)++upper) l) ((names l)++upper) r
 
+splitsFor :: Node -> [String] -> HM.HashMap String Node
+splitsFor node list = splitsFor' node HM.empty list
+
+splitsFor' :: Node -> HM.HashMap String Node -> [String] -> HM.HashMap String Node
+splitsFor' root startMap [] = startMap
+splitsFor' root startMap remaining | (sort (names root)) == remaining = foldl' (\hash key -> HM.insert key root hash) startMap remaining
+
+splitsFor' (Tree left right) startMap remaining = (go left right (go right left startMap)) where
+                                                     go l r map = splitsFor' l map reduced where
+                                                       reduced = remaining \\ (names r)
+splitsFor' (INode left right dist) startMap remaining = (go left right (go right left startMap)) where
+                                                     go l r map = splitsFor' l map reduced where
+                                                       reduced = remaining \\ (names r)
+
+splitsFor' leaf startMap remaining = error $ "Tree and Alignment are not congruent: Can't find leaf " ++ (head (remaining \\ (names leaf))) ++ " in tree"
