@@ -4,30 +4,33 @@ import Tree
 import Alignment.Dist
 import Text.Printf
 import System.Console.GetOpt
-import Text.ParserCombinators.Parsec
+import Numeric
 
 main = do args <- getArgs
-          parseCommand args >>= putStrLn
+          ans <- parseCommand args 
+          putStrLn ans
+          return ()
  
-parseCommand [String] -> String
+parseCommand :: [String] -> IO String
 parseCommand ("-g":xs) = diff homGapDist xs
 parseCommand ("-t":xs) = diffTree homTreeDist xs
 parseCommand xs = diff homDist xs
 
 diffTree dist (x:y:z:xs) = do a <- parseFastaFile x
                               b <- parseFastaFile y
-                              return (case (parse parseTree "" (treeStr)) of 
+                              treeStr <- readFile z
+                              return (case (readBiNewickTree treeStr) of 
                                       Left err -> show err
-                                      Right t -> goTree dist (compatible t a) (compatible t b) t a b -- (printf "%.6f" (dist a b)) ++ (show (enforceBi t)))
+                                      Right t -> goTree dist (compatible t a) (compatible t b) t a b) where
 
 diffTree dist x = return "Usage: phydist <fasta1> <fasta2> <tree>"
 
 diff dist (x:y:xs) = do a <- parseFastaFile x
                         b <- parseFastaFile y
-                        printf "%.6f" (dist a b)
+                        return $ showEFloat Nothing (dist a b) ""
 diff dist x = return "Usage: phydist <fasta1> <fasta2>"
 
 
-goTree dist false x t a b = "Tree is incompatible with first alignment"
-goTree dist true false t a b = "Tree is incompatible with second alignment"
-goTree dist true true t a b = printf "%.6f" (dist t a b)
+goTree dist False x t a b = "Tree is incompatible with first alignment"
+goTree dist True False t a b = "Tree is incompatible with second alignment"
+goTree dist True True t a b = showEFloat Nothing (dist t a b) ""

@@ -9,9 +9,18 @@ import Text.ParserCombinators.Parsec.Language
 import qualified Data.HashMap as HM
 import Data.List
 
-data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double | Tree Node Node deriving Show 
+data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double | Tree Node Node deriving (Show,Eq) 
 
 data PNode = PLeaf {pname :: String, pdistance :: Double } | PINode [PNode] Double | PTree [PNode] deriving Show
+
+
+readNewickTree :: String -> Either ParseError PNode
+readNewickTree = parse parseTree "" 
+
+readBiNewickTree :: String -> Either ParseError Node
+readBiNewickTree x = case (readNewickTree x) of  
+                        Left err -> Left err
+                        Right t -> Right (enforceBi t)
 
 leaves :: Node -> [Node]
 leaves = traverse []
