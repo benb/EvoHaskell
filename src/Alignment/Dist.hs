@@ -1,22 +1,20 @@
 module Alignment.Dist where
 import Alignment
 
-numberifyBasic :: ListAlignment -> [[Int]]
-numberifyBasic aln = map nfy myseqs where
-        myseqs = sequences aln
-        nfy = numberMap 0
-        numberMap i [] = []
-        numberMap i ('-':xs) = -1 : numberMap i xs
-        numberMap i (x:xs) = i : numberMap (i+1) xs
-
-numberifyGap :: ListAlignment -> [[Int]]
-numberifyGap aln = map nfy myseqs where
-        myseqs = sequences aln
-        nfy = numberMap 0
-        numberMap i [] = []
-        numberMap i ('-':xs) = (-(i+1)) : numberMap i xs
-        numberMap i (x:xs) = i : numberMap (i+1) xs
-
+--
+--gapEvent :: Node -> ListAlignment -> [[Maybe Split]]
+--gapEvent tree (ListAlignment names seqs cols) = gapEvent' tree names cols
+--
+--gapEvent' :: Node -> [Name] -> [Column] -> [[Maybe Split]]
+--gapEvent' (Tree l r) names cols = if (contained leftNames gapNames)  where
+--                                             gapNames = map (\x -> fst x) $ filter (\x -> (snd x=='-')) $ zip names cols 
+--                                             leftNames = names l
+--                                             rightNames = names r
+--                                             contained x y = contained' x x y
+--                                             contained' full (x:[]) (y:[]) = x==y
+--                                             contained' full (x:[]) (y:ys) = x==y || contained full full ys
+--                                             contained' full (x:xs) (y:ys) = x==y || contained full xs (y:ys)
+--
 homDist = genDist numberifyBasic
 homGapDist = genDist numberifyGap
 

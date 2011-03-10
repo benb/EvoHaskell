@@ -29,6 +29,40 @@ type Name = String
 type Sequence = [Char]
 type Column = [Char]
 
+data NumberedColumn = NumberedColumn {coldata::[(Char,Int)]} deriving (Eq)
+instance Ord NumberedColumn where 
+                       compare (NumberedColumn x) (NumberedColumn y) = compare' x y Nothing where
+                                --maintain sequence ordering
+                                compare' ((x,i):xs) ((y,j):ys) ans | x/='-' && y/='-' = compare i j
+
+                                -- two all gap columns!?
+                                compare' [] [] Nothing = EQ 
+
+                                -- all pairs are gap-base or base-gap --> arbitrary
+                                compare' [] [] (Just ans) = ans 
+
+                                --first gap on left side -> set arbitrary answer and keep looking for base-base pairs
+                                compare' (('-',i):xs) ((y,j):ys) Nothing | y/='-' = compare' xs ys (Just GT)
+                                compare' ((x,i):xs) (('-',j):ys) Nothing | x/='-'= compare' xs ys (Just LT)
+                                compare' (('-',i):xs) (('-',j):ys) ans = compare' xs ys ans
+
+                                --gap-base or base gap with existing ordering
+                                compare' (('-',i):xs) ((y,j):ys) ans = compare' xs ys ans
+                                compare' ((x,i):xs) (('-',j):ys) ans = compare' xs ys ans
+
+sortAlignment :: ListAlignment -> ListAlignment
+sortAlignment (ListAlignment names seqs cols) = ListAlignment names (transpose ans) ans where
+                                                  numbers = transpose $ numberifyBasic $ ListAlignment names seqs cols
+                                                  numbCols = map NumberedColumn $ map (\(a,b)-> zip a b) $ zip cols numbers
+                                                  reordered = sort numbCols
+                                                  ans = map (map fst) (map coldata reordered)
+
+
+
+                                                
+
+
+
 gapPos :: Sequence -> [(Int,Int)]
 gapPos s = gapPos' s [] Nothing 0
 
@@ -63,9 +97,15 @@ gapPos' (x:xs) list Nothing pos = gapPos' xs list Nothing (pos+1)
 data ListAlignment = ListAlignment {names ::  [Name],
                             sequences :: [Sequence],
                             columns :: [Column]} deriving Show
+instance Eq ListAlignment where 
+        (==) a b = (names a) == (names b) && (sequences a) == (sequences b) --assume cols are ok
+
 
 quickListAlignment :: [Name] -> [Sequence] -> ListAlignment
 quickListAlignment names sequences = ListAlignment names sequences (transpose sequences)
+
+fromColumnListAlignment :: [Name] -> [Column] -> ListAlignment
+fromColumnListAlignment names cols = ListAlignment names (transpose cols) cols
 
 
 toFasta :: ListAlignment -> [String]
@@ -75,3 +115,45 @@ toFasta aln = stringList where --foldl (++) "" stringList where
                  toSeqStr :: (String,String) -> String
                  toSeqStr (name,seq) = ">" ++ name ++ "\n" ++ seq ++ "\n"
 
+removeAllGaps :: ListAlignment -> ListAlignment
+removeAllGaps (ListAlignment names seqs cols) = fromColumnListAlignment names (removeAllGaps' cols)
+
+removeAllGaps' :: [Column] -> [Column]
+removeAllGaps' = filter notAllGap where 
+ 
+notAllGap :: Column -> Bool
+notAllGap ('-':[]) = False
+notAllGap ('-':xs) = notAllGap xs
+notAllGap (x:xs) = True
+
+hasGap :: Column -> Bool
+hasGap [] = False
+hasGap ('-':xs) = True
+hasGap (x:xs) = hasGap xs
+
+
+--orderGaps :: ListAlignment -> ListAlignment
+--orderGaps (ListAlignment names seqs cols) = fromColumnListAlignment names (orderGaps' cols)
+
+
+--orderGaps' :: [Column] -> [Column] -> [Column]
+--orderGaps' [] x = x:[]
+--orderGaps' (x:xs) [] | hasGap x = orderGaps' xs x:[]
+--orderGaps' (x:xs) [] = orderGaps' xs []
+--orderGaps (x:xs) (y:ys) | canPushTogether x y 
+                        
+numberifyBasic :: ListAlignment -> [[Int]]
+numberifyBasic aln = map nfy myseqs where
+        myseqs = sequences aln
+        nfy = numberMap 0
+        numberMap i [] = []
+        numberMap i ('-':xs) = -1 : numberMap i xs
+        numberMap i (x:xs) = i : numberMap (i+1) xs
+
+numberifyGap :: ListAlignment -> [[Int]]
+numberifyGap aln = map nfy myseqs where
+        myseqs = sequences aln
+        nfy = numberMap 0
+        numberMap i [] = []
+        numberMap i ('-':xs) = (-(i+1)) : numberMap i xs
+        numberMap i (x:xs) = i : numberMap (i+1) xs
