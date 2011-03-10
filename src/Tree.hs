@@ -30,17 +30,6 @@ enforceBi (PINode (a:xs) dist) = INode (enforceBi a) (enforceBi $ PINode xs 0.0)
 enforceBi (PTree (a:b:[])) =  Tree (enforceBi a) (enforceBi b)
 enforceBi (PTree (a:xs)) = Tree (enforceBi a) (enforceBi $ PINode xs 0.0)
 
---parseTree :: Parser Tree
---parseTree = do {
---                char '('
---                left <- parseNode
---                char ','
---                right <- parseNode
---                char ')'
---                char ';'
---                return Tree left right
---} 
---
 -- http://evolution.genetics.washington.edu/phylip/newicktree.html :
 -- "A name can be any string of printable characters except blanks, colons, semcolons, parentheses, and square brackets." 
 
