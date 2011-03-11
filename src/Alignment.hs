@@ -169,7 +169,7 @@ numberifyGapTree tree aln = transpose $ nfy (columns aln) where
         numberMap y [] = []
         numberMap y (x:xs) = (snd ans) : (numberMap (fst ans) xs) where
                               ans = numberMap' y x $ names aln
-                              gapNums = splitsFor tree gapNames
+                              gapNums = unrootedSplitsFor tree gapNames
                               gapNames = map (\x-> fst x) $ filter (\t -> (snd t)=='-') $ zip (names aln) x
                               numberMap':: [Int] -> Column -> [String] -> ([Int],[(Int,Maybe Node)]) 
                               numberMap' [] [] [] = ([],[])
