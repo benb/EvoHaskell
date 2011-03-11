@@ -1,5 +1,6 @@
 module Alignment.Dist where
 import Alignment
+import Debug.Trace
 
 --
 --gapEvent :: Node -> ListAlignment -> [[Maybe Split]]
@@ -31,7 +32,7 @@ tupify f = fmap (map (map toTup)) f where
                   else 
                         (i,Nothing)
 
-tupDist :: Eq a => (ListAlignment -> [[(Int,Maybe a)]]) -> ListAlignment -> ListAlignment -> Double
+tupDist :: (Eq a,Show a) => (ListAlignment -> [[(Int,Maybe a)]]) -> ListAlignment -> ListAlignment -> Double
 tupDist numF aln1 aln2 = answer (diff3 pairs1 pairs2) where
         
         pairs1 = pairs (numF aln1)
@@ -42,29 +43,33 @@ tupDist numF aln1 aln2 = answer (diff3 pairs1 pairs2) where
         
         pairs :: [[b]] -> [[[(b,b)]]]
         pairs [] = []
-        pairs (x:[]) = []
-        pairs (x:xs) = pairsXY (zip (repeat x) xs) : pairs (xs)
+        pairs list = pairs' [] list
+        pairs' :: [[b]] -> [[b]] -> [[[(b,b)]]]
+        pairs' head (x:xs) = (pairsXY (zip (repeat x) (reverse head)) ++ pairsXY (zip (repeat x) xs)) : (pairs' (x:head) xs) 
+        pairs' head [] = [] --(pairsXY (zip (repeat x) (reverse head)) ++ pairsXY (zip (repeat x) xs)) : (pairs' x:head xs)
 
         pairsXY []  = []
         pairsXY ((a,b):xs) = zip a b : pairsXY xs
 
         addT (a,b) (c,d) = (a+c,b+d)
 
-        diff2 :: Eq a=> [((Int,Maybe a),(Int,Maybe a))] -> [((Int,Maybe a),(Int,Maybe a))] -> (Int,Int)
+        diff2 :: (Eq a,Show a)=> [((Int,Maybe a),(Int,Maybe a))] -> [((Int,Maybe a),(Int,Maybe a))] -> (Int,Int)
         --skip gaps
         diff2 (((x1,Just f),(x2,xx2)):xs) y = diff2 xs y
         diff2 x (((y1,Just f),y2):ys) = diff2 x ys
         --Same
+--        diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 && x2==y2 && trace ("Same " ++ (show x1) ++ " " ++ (show y1) ++ " " ++ (show x2) ++ " " ++ (show y2)) False = undefined
         diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 && x2==y2 = addT (diff2 xs ys) (1,0)
         --Different
+--        diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 && trace ("Diff " ++ (show x1) ++ " " ++ (show y1) ++ " " ++ (show x2) ++ " " ++ (show y2)) False = undefined
         diff2 ((x1,x2):xs) ((y1,y2):ys) | x1 == y1 = addT (diff2 xs ys) (1,1)
         diff2 [] [] = (0,0)
 
-        diff :: Eq a => [[((Int,Maybe a),(Int,Maybe a))]] -> [[((Int,Maybe a),(Int,Maybe a))]] -> (Int,Int)
+        diff :: (Eq a,Show a) => [[((Int,Maybe a),(Int,Maybe a))]] -> [[((Int,Maybe a),(Int,Maybe a))]] -> (Int,Int)
         diff [] [] = (0,0)
         diff (x:xs) (y:ys) = addT (diff2 x y) (diff xs ys)
 
         
-        diff3 :: Eq a => [[[((Int,Maybe a),(Int,Maybe a))]]] -> [[[((Int,Maybe a),(Int,Maybe a))]]] -> (Int,Int)
+        diff3 :: (Eq a,Show a) => [[[((Int,Maybe a),(Int,Maybe a))]]] -> [[[((Int,Maybe a),(Int,Maybe a))]]] -> (Int,Int)
         diff3 [] [] = (0,0)
         diff3 (x:xs) (y:ys) = addT (diff x y) (diff3 xs ys)
