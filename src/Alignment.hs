@@ -11,23 +11,28 @@ appendString old add = case  old of
                 (name,x):xs -> (name,(x++add)):xs
 
 --Fasta format
-parseFasta :: [L.ByteString] -> [(String,String)] -> [(String,String)]
-parseFasta [] old =  old
-parseFasta bs old =  case L.unpack (L.take 1 (head bs)) of 
-                      ['>'] -> parseFasta (tail bs) ((L.unpack (L.drop 1 (head bs)),"") : old)
-                      _ -> parseFasta (tail bs) (appendString old (L.unpack (head bs))) 
+parseFasta' :: [(String,String)] -> [L.ByteString] -> [(String,String)]
+parseFasta' old [] =  old
+parseFasta' old bs =  case L.unpack (L.take 1 (head bs)) of 
+                      ['>'] -> parseFasta' ((L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
+                      _ -> parseFasta' (appendString old (L.unpack (head bs))) $ tail bs 
+
+parseFasta :: Monad m => [L.ByteString] -> m [(String,String)]
+parseFasta input = return $ parseFasta' [] input 
+
  
-parseFastaString :: L.ByteString -> ListAlignment
 
-parseFastaString input = quickListAlignment names seqs where 
-                                mydata = sortBy sortX (parseFasta (L.lines input) [])
+parseAlignmentString :: Monad m =>  ([L.ByteString] -> m [(String,String)]) -> L.ByteString -> m ListAlignment
+
+parseAlignmentString parser input = ((liftM2 quickListAlignment) names seqs) where 
+                                mydata = (liftM $ sortBy sortX) (parser (L.lines input))
                                 sortX (a,b) (c,d) = compare a c
-                                names = map fst mydata
-                                seqs = map snd mydata 
+                                names = (liftM $ map fst) mydata
+                                seqs = (liftM $ map snd) mydata 
 
 
-parseFastaFile :: String -> IO ListAlignment
-parseFastaFile name = parseFastaString `liftM` (L.readFile name)
+parseAlignmentFile :: Monad m => ([L.ByteString] -> m [(String,String)]) -> String -> IO (m ListAlignment)
+parseAlignmentFile parser name = parseAlignmentString parser `liftM` (L.readFile name)
 
 --"relaxed" phylip format
 

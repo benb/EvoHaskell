@@ -8,6 +8,7 @@ import Text.ParserCombinators.Parsec.Token
 import Text.ParserCombinators.Parsec.Language
 import qualified Data.HashMap as HM
 import Data.List
+import Control.Monad.Error
 
 data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double | Tree Node Node deriving (Eq) 
 instance Show Node where
@@ -16,10 +17,12 @@ instance Show Node where
 data PNode = PLeaf {pname :: String, pdistance :: Double } | PINode [PNode] Double | PTree [PNode] deriving Show
 
 
-readNewickTree :: String -> Either ParseError PNode
-readNewickTree = parse parseTree "" 
+readNewickTree :: String -> Either String PNode
+readNewickTree x = case (parse parseTree "" x) of
+                        Right t -> Right t
+                        Left err -> Left $ show err
 
-readBiNewickTree :: String -> Either ParseError Node
+readBiNewickTree :: String -> Either String Node
 readBiNewickTree x = case (readNewickTree x) of  
                         Left err -> Left err
                         Right t -> Right (enforceBi t)

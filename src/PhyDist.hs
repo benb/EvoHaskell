@@ -5,6 +5,7 @@ import Alignment.Dist
 import Text.Printf
 import System.Console.GetOpt
 import Numeric
+import Control.Monad
 
 main = do args <- getArgs
           ans <- parseCommand args 
@@ -16,21 +17,25 @@ parseCommand ("-g":xs) = diff homGapDist xs
 parseCommand ("-t":xs) = diffTree homTreeDist xs
 parseCommand xs = diff homDist xs
 
-diffTree dist (x:y:z:xs) = do a <- parseFastaFile x
-                              b <- parseFastaFile y
+diffTree dist (x:y:z:xs) = do a <- parseAlignmentFile parseFasta x
+                              b <- parseAlignmentFile parseFasta y
                               treeStr <- readFile z
-                              return (case (readBiNewickTree treeStr) of 
-                                      Left err -> show err
-                                      Right t -> goTree dist (compatible t a) (compatible t b) t a b) where
+                              let t = readBiNewickTree treeStr
+                              return $ goTree dist ((liftM2 compatible) t a) ((liftM2 compatible) t b) t a b
 
 diffTree dist x = return "Usage: phydist <fasta1> <fasta2> <tree>"
 
-diff dist (x:y:xs) = do a <- parseFastaFile x
-                        b <- parseFastaFile y
-                        return $ showEFloat Nothing (dist a b) ""
+diff :: (ListAlignment -> ListAlignment -> Double) -> [String] -> IO String
+diff dist (x:y:xs) = do a <- parseAlignmentFile parseFasta x
+                        b <- parseAlignmentFile parseFasta y
+                        let ans = (liftM2 dist) a b
+                        case ans of 
+                                (Right output) -> return $ showEFloat Nothing output ""
+                                (Left err) -> return err
+
 diff dist x = return "Usage: phydist <fasta1> <fasta2>"
 
 
-goTree dist False x t a b = "Tree is incompatible with first alignment"
-goTree dist True False t a b = "Tree is incompatible with second alignment"
-goTree dist True True t a b = showEFloat Nothing (dist t a b) ""
+goTree dist (Right False) x t a b = "Tree is incompatible with first alignment"
+goTree dist (Right True) (Right False) t a b = "Tree is incompatible with second alignment"
+goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = showEFloat Nothing (dist t a b) ""
