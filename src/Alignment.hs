@@ -10,6 +10,7 @@ appendString :: [(String,String)] -> String -> [(String, String)]
 appendString old add = case  old of 
                 (name,x):xs -> (name,(x++add)):xs
 
+--Fasta format
 parseFasta :: [L.ByteString] -> [(String,String)] -> [(String,String)]
 parseFasta [] old =  old
 parseFasta bs old =  case L.unpack (L.take 1 (head bs)) of 
@@ -27,6 +28,36 @@ parseFastaString input = quickListAlignment names seqs where
 
 parseFastaFile :: String -> IO ListAlignment
 parseFastaFile name = parseFastaString `liftM` (L.readFile name)
+
+--"relaxed" phylip format
+
+parsePhylip :: Monad m =>  [L.ByteString] -> m [(String,String)]
+parsePhylip = parsePhylipHeader
+parsePhylipHeader :: Monad m => [L.ByteString] -> m [(String,String)]
+parsePhylipBody :: Int -> Int -> [(L.ByteString,L.ByteString)] -> [L.ByteString] -> [(String,String)]
+parsePhylipBody' :: [L.ByteString] -> [(L.ByteString,L.ByteString)] -> [(L.ByteString,L.ByteString)] -> [(String,String)]
+
+
+parsePhylipHeader (x:xs)  = (case (ans,nChar) of
+                                (Just a,Just c) | find (\x-> length (snd x)/=c) a == Nothing -> return a
+                                _ -> fail "Can't parse alignment") where
+                                header = L.dropWhile (==' ') x
+                                t1 = L.readInt header
+                                nTaxa = fmap fst t1
+                                t2 = fmap snd t1 >>= L.readInt . L.dropWhile  (==' ')
+                                nChar = fmap fst t2
+                                ans = fmap (\x -> parsePhylipBody x x [] xs) nTaxa
+
+parsePhylipBody nTaxa 0 output (x:xs) = parsePhylipBody' xs [] $ reverse output
+parsePhylipBody nTaxa remaining output (x:xs) = parsePhylipBody nTaxa (remaining-1) ((name,seq):output) xs where
+                                                (name,remainder) = L.break (==' ') x
+                                                seq = L.filter (/=' ') remainder
+                                             
+parsePhylipBody' [] top [] = map (\(x,y) -> (L.unpack x,L.unpack y)) $ reverse top 
+parsePhylipBody' (x:xs) top [] = parsePhylipBody' (x:xs) [] $ reverse top
+parsePhylipBody' (x:xs) top ((name,seq):ys) = parsePhylipBody' xs ((name,seq `L.append` (L.filter (/=' ') x)):top) ys
+
+
 
 type Name = String
 type Sequence = [Char]
