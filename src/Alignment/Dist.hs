@@ -22,7 +22,7 @@ homTreeDist t = tupDist (numberifyGapTree t)
 
 
 
-genDist :: (ListAlignment -> [[(Int)]]) -> ListAlignment -> ListAlignment -> Double
+genDist :: (ListAlignment -> [[(Int)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
 genDist f = tupDist (tupify f)
                         
 tupify :: (ListAlignment -> [[(Int)]]) -> (ListAlignment -> [[(Int,Maybe Int)]])
@@ -32,15 +32,14 @@ tupify f = fmap (map (map toTup)) f where
                   else 
                         (i,Nothing)
 
-tupDist :: (Eq a,Show a) => (ListAlignment -> [[(Int,Maybe a)]]) -> ListAlignment -> ListAlignment -> Double
+tupDist :: (Eq a,Show a) => (ListAlignment -> [[(Int,Maybe a)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
 tupDist numF aln1 aln2 = answer (diff3 pairs1 pairs2) where
         
         pairs1 = pairs (numF aln1)
         pairs2 = pairs (numF aln2)
 
-        answer :: (Int,Int) -> Double
-        answer (numPairs,numDiffs) = (fromIntegral numDiffs) / (fromIntegral numPairs)
-        
+        answer (x,y) = (y,x) -- for some reason I reversed the convention inside tupDist
+
         pairs :: [[b]] -> [[[(b,b)]]]
         pairs [] = []
         pairs list = pairs' [] list
