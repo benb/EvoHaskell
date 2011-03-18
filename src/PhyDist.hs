@@ -13,13 +13,15 @@ main = do args <- getArgs
           return ()
  
 parseCommand :: [String] -> IO String
-parseCommand ("-g":xs) = diff homGapDist xs
+parseCommand ("-g":xs) = Main.diff homGapDist xs
 parseCommand ("-t":xs) = diffTree homTreeDist xs
-parseCommand xs = diff homDist xs
+parseCommand xs = Main.diff homDist xs
 
 diffTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> [String] -> IO String
-diffTree dist (x:y:z:xs) = do a <- parseAlignmentFile parseFasta x
-                              b <- parseAlignmentFile parseFasta y
+diffTree dist (x:y:z:xs) = do rawa <- parseAlignmentFile parseFasta x
+                              rawb <- parseAlignmentFile parseFasta y
+                              let a = fmap sortAlignment rawa
+                              let b = fmap sortAlignment rawb
                               treeStr <- readFile z
                               let t = readBiNewickTree treeStr
                               return $ goTree dist ((liftM2 compatible) t a) ((liftM2 compatible) t b) t a b
@@ -27,11 +29,13 @@ diffTree dist (x:y:z:xs) = do a <- parseAlignmentFile parseFasta x
 diffTree dist x = return "Usage: phydist <fasta1> <fasta2> <tree>"
 
 diff :: (ListAlignment -> ListAlignment -> (Int,Int)) -> [String] -> IO String
-diff dist (x:y:xs) = do a <- parseAlignmentFile parseFasta x
-                        b <- parseAlignmentFile parseFasta y
+diff dist (x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
+                        rawb <- parseAlignmentFile parseFasta y
+                        let a = fmap sortAlignment rawa
+                        let b = fmap sortAlignment rawb
                         let ans = (liftM2 dist) a b
                         case ans of 
-                                (Right (numDiff,numPairs)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "")
+                                (Right (numPairs,numDiff)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "")
                                 (Left err) -> return err
 
 diff dist x = return "Usage: phydist <fasta1> <fasta2>"
@@ -41,7 +45,7 @@ goTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> Either String Bool 
 goTree dist (Right False) x t a b = "Tree is incompatible with first alignment"
 goTree dist (Right True) (Right False) t a b = "Tree is incompatible with second alignment"
 goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "") 
-                                                                   where numPairs = fst ans
-                                                                         numDiff = snd ans
+                                                                   where numPairs = snd ans
+                                                                         numDiff = fst ans
                                                                          ans = dist t a b 
 
