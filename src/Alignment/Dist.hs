@@ -59,7 +59,7 @@ tupDist numF aln1 aln2 =  tupDist' num1 num2 [] [] (0,0) where
         
 
 diffIn' :: (Eq a,Show a)=> [((Int,Maybe a),(Int,Maybe a))] -> [((Int,Maybe a),(Int,Maybe a))] -> (Int,Int) -> (Int,Int)
-diffIn' (x:xs) (y:ys) ans | trace ((show x) ++ (show y)) False = undefined
+--diffIn' (x:xs) (y:ys) ans | trace ((show x) ++ (show y)) False = undefined
 --First, skip gaps on left side of xs and ys
 diffIn' (((x1,m1),(x2,xx2)):xs) y (i,j) | x1<0 || m1/=Nothing = i `seq` j `seq` diffIn' xs y (i,j)
 diffIn' x (((y1,m1),y2):ys) (i,j) | y1<0 || m1/=Nothing  = i `seq` j `seq` diffIn' x ys (i,j)
@@ -70,5 +70,5 @@ diffIn' ((x1,(x2i,x2g)):xs) ((y1,(y2i,y2g)):ys) (i,j) | (x2i<0 && y2i>0 && x2g==
 diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j) | x2==y2  = i `seq` j `seq` diffIn' xs ys  (i+2,j)
 --Different
 diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j)  = i `seq` j `seq` diffIn' xs ys (i+2,j+2) 
-diffIn' xs ys ans | trace ((show xs) ++ (show ys)) False = undefined
+--diffIn' xs ys ans | trace ((show xs) ++ (show ys)) False = undefined
 diffIn' [] [] t = t
