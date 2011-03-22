@@ -27,7 +27,9 @@ diffTree dist (x:y:z:xs) = do rawa <- parseAlignmentFile parseFasta x
                               let t = readBiNewickTree treeStr
                               return $ goTree dist ((liftM2 compatible) t a) ((liftM2 compatible) t b) t a b
 
-diffTree dist x = return "Usage: phydist <fasta1> <fasta2> <tree>"
+diffTree dist x = return usage
+
+usage = "Usage: alndist <-t> <-g> <-n> <fasta1> <fasta2> <tree>"
 
 diff :: (ListAlignment -> ListAlignment -> (Int,Int)) -> [String] -> IO String
 diff dist (x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
@@ -39,7 +41,7 @@ diff dist (x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
                                 (Right (numPairs,numDiff)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "")
                                 (Left err) -> return err
 
-diff dist x = return "Usage: phydist <fasta1> <fasta2>"
+diff dist x = return usage
 
 
 goTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> Either String Bool  -> Either String Bool -> Either String Node -> Either String ListAlignment -> Either String ListAlignment -> String

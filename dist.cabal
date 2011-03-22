@@ -11,8 +11,8 @@ Build-Type:     Simple
 --Executable homdist
 --        Main-Is: HomDist.hs
 --       HS-Source-Dirs: src
-Executable treedist
-        Main-Is: PhyDist.hs
+Executable alndist
+        Main-Is: AlnDist.hs
         HS-Source-Dirs: src
 library
         Exposed-Modules: Alignment, Alignment.Dist, Tree
