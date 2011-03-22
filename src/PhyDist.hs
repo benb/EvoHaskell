@@ -14,6 +14,7 @@ main = do args <- getArgs
  
 parseCommand :: [String] -> IO String
 parseCommand ("-g":xs) = Main.diff homGapDist xs
+parseCommand ("-n":xs) = Main.diff hom0Dist xs
 parseCommand ("-t":xs) = diffTree homTreeDist xs
 parseCommand xs = Main.diff homDist xs
 

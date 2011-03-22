@@ -16,6 +16,7 @@ import Debug.Trace
 --                                             contained' full (x:[]) (y:ys) = x==y || contained full full ys
 --                                             contained' full (x:xs) (y:ys) = x==y || contained full xs (y:ys)
 --
+hom0Dist = zeroDist numberifyBasic
 homDist = genDist numberifyBasic
 homGapDist = genDist numberifyGap
 homTreeDist t = tupDist (numberifyGapTree t)
@@ -23,14 +24,18 @@ homTreeDist t = tupDist (numberifyGapTree t)
 
 
 genDist :: (ListAlignment -> [[(Int)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
-genDist f = tupDist (tupify f)
+genDist f = tupDist (tupify f Just)
+
+zeroDist f = tupDist (tupify f (\x->Nothing))
                         
-tupify :: (ListAlignment -> [[(Int)]]) -> (ListAlignment -> [[(Int,Maybe Int)]])
-tupify f = fmap (map (map toTup)) f where 
+tupify :: (ListAlignment -> [[(Int)]]) -> (Int->Maybe Int) -> (ListAlignment -> [[(Int,Maybe Int)]])
+tupify f gapHandler = fmap (map (map toTup)) f where 
         toTup i = if (i < 0) then
-                        (i,Just i)
+                        (i,gapHandler i)
                   else 
                         (i,Nothing)
+
+
 
 
 tupDistSeq :: (Eq a, Show a) => [(Int,Maybe a)] -> [(Int,Maybe a)] -> [[(Int,Maybe a)]] ->  [[(Int,Maybe a)]] -> (Int,Int) -> (Int,Int)
@@ -51,11 +56,15 @@ tupDist numF aln1 aln2 =  tupDist' num1 num2 [] [] (0,0) where
         
 
 diffIn' :: (Eq a,Show a)=> [((Int,Maybe a),(Int,Maybe a))] -> [((Int,Maybe a),(Int,Maybe a))] -> (Int,Int) -> (Int,Int)
---Gap
-diffIn' (((x1,Just f),(x2,xx2)):xs) y (i,j) = i `seq` j `seq` diffIn' xs y (i,j)
-diffIn' x (((y1,Just f),y2):ys) (i,j) = i `seq` j `seq` diffIn' x ys (i,j)
+--diffIn' (x:xs) (y:ys) ans | trace ((show x) ++ (show y)) False = undefined
+--First, skip gaps on left side of xs and ys
+diffIn' (((x1,m1),(x2,xx2)):xs) y (i,j) | x1<0 || m1/=Nothing = i `seq` j `seq` diffIn' xs y (i,j)
+diffIn' x (((y1,m1),y2):ys) (i,j) | y1<0 || m1/=Nothing  = i `seq` j `seq` diffIn' x ys (i,j)
+
+--Metric 0, ignore gaps
+diffIn' ((x1,(x2i,x2g)):xs) ((y1,(y2i,y2g)):ys) (i,j) | (x2i<0 && y2i>0 && x2g==Nothing) || (x2i>0 && y2i<0 && y2g==Nothing)  = i `seq` j `seq` diffIn' xs ys  (i+1,j+1)
 --Same
-diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j) | x2==y2  = i `seq` j `seq` diffIn' xs ys  (i+1,j)
+diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j) | x2==y2  = i `seq` j `seq` diffIn' xs ys  (i+2,j)
 --Different
-diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j)  = i `seq` j `seq` diffIn' xs ys (i+1,j+1) 
+diffIn' ((x1,x2):xs) ((y1,y2):ys) (i,j)  = i `seq` j `seq` diffIn' xs ys (i+2,j+2) 
 diffIn' [] [] t = t
