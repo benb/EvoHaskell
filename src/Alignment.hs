@@ -12,6 +12,8 @@ appendString old add = case  old of
 
 --Fasta format
 parseFasta' :: [(String,String)] -> [L.ByteString] -> [(String,String)]
+--this is an inefficient way to check that this alignment will be valid
+parseFasta' ((name,""):(name2,seq2):(name3,seq3):xs) bs | ((length seq2) /= (length seq3)) = error $ "lengths of sequences " ++ name2 ++ " and " ++ name3 ++ " don't match"
 parseFasta' old [] =  old
 parseFasta' old bs =  case L.unpack (L.take 1 (head bs)) of 
                       ['>'] -> parseFasta' ((L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
@@ -62,6 +64,17 @@ parsePhylipBody' [] top [] = map (\(x,y) -> (L.unpack x,L.unpack y)) $ reverse t
 parsePhylipBody' (x:xs) top [] = parsePhylipBody' (x:xs) [] $ reverse top
 parsePhylipBody' (x:xs) top ((name,seq):ys) = parsePhylipBody' xs ((name,seq `L.append` (L.filter (/=' ') x)):top) ys
 
+dropGaps :: ListAlignment -> [(String,String)]
+dropGaps a = zip (names a) (map dropGap $ sequences a)
+
+dropGap :: String -> String
+dropGap xs = filter (not . gap) xs
+
+gap :: Char -> Bool
+gap '-' = True
+gap '.' = True
+gap '~' = True
+gap x = False
 
 
 type Name = String
