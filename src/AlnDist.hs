@@ -48,8 +48,8 @@ goTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> Either String Bool 
 goTree dist (Right False) x t a b = "Tree is incompatible with first alignment"
 goTree dist (Right True) (Right False) t a b = "Tree is incompatible with second alignment"
 goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "") 
-                                                                   where numPairs = snd ans
-                                                                         numDiff = fst ans
+                                                                   where numPairs = fst ans
+                                                                         numDiff = snd ans
                                                                          ans = dist t a b 
 goTree dist x y (Left err) a b = err
 goTree dist x y t (Left err) b = err
