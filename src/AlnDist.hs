@@ -38,7 +38,7 @@ diff dist (x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
                         let b = fmap sortAlignment rawb
                         let ans = (liftM2 dist) a b
                         case ans of 
-                                (Right (numPairs,numDiff)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "")
+                                (Right (numPairs,numDiff)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (show ((fromIntegral numDiff)/(fromIntegral numPairs)))
                                 (Left err) -> return err
 
 diff dist x = return usage
@@ -47,7 +47,7 @@ diff dist x = return usage
 goTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> Either String Bool  -> Either String Bool -> Either String Node -> Either String ListAlignment -> Either String ListAlignment -> String
 goTree dist (Right False) x t a b = "Tree is incompatible with first alignment"
 goTree dist (Right True) (Right False) t a b = "Tree is incompatible with second alignment"
-goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (showEFloat Nothing ((fromIntegral numDiff)/(fromIntegral numPairs)) "") 
+goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (show ((fromIntegral numDiff)/(fromIntegral numPairs))) 
                                                                    where numPairs = fst ans
                                                                          numDiff = snd ans
                                                                          ans = dist t a b 
