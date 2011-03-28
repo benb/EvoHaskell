@@ -4,6 +4,7 @@ import qualified Tree
 import qualified Data.ByteString.Lazy.Char8 as L
 import Control.Monad
 import Data.List
+import Data.Char
 import qualified Data.HashMap as HM
 
 appendString :: [(String,String)] -> String -> [(String, String)]
@@ -16,11 +17,14 @@ parseFasta' :: [(String,String)] -> [L.ByteString] -> [(String,String)]
 parseFasta' ((name,""):(name2,seq2):(name3,seq3):xs) bs | ((length seq2) /= (length seq3)) = error $ "lengths of sequences " ++ name2 ++ " and " ++ name3 ++ " don't match"
 parseFasta' old [] =  old
 parseFasta' old bs =  case L.unpack (L.take 1 (head bs)) of 
-                      ['>'] -> parseFasta' ((L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
+                      ['>'] -> parseFasta' ((trim $ L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
                       _ -> parseFasta' (appendString old (L.unpack (head bs))) $ tail bs 
 
 parseFasta :: Monad m => [L.ByteString] -> m [(String,String)]
 parseFasta input = return $ parseFasta' [] input 
+
+trim :: String -> String
+trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace 
 
  
 
@@ -68,13 +72,13 @@ dropGaps :: ListAlignment -> [(String,String)]
 dropGaps a = zip (names a) (map dropGap $ sequences a)
 
 dropGap :: String -> String
-dropGap xs = filter (not . gap) xs
+dropGap xs = filter (not . isGap) xs
 
-gap :: Char -> Bool
-gap '-' = True
-gap '.' = True
-gap '~' = True
-gap x = False
+isGap :: Char -> Bool
+isGap '-' = True
+isGap '.' = True
+isGap '~' = True
+isGap x = False
 
 
 type Name = String
@@ -85,7 +89,7 @@ data NumberedColumn = NumberedColumn {coldata::[(Char,Int)]} deriving (Eq)
 instance Ord NumberedColumn where 
                        compare (NumberedColumn x) (NumberedColumn y) = compare' x y Nothing where
                                 --maintain sequence ordering
-                                compare' ((x,i):xs) ((y,j):ys) ans | x/='-' && y/='-' = compare i j
+                                compare' ((x,i):xs) ((y,j):ys) ans | (not $ isGap x) && (not $ isGap y) = compare i j
 
                                 -- two all gap columns!?
                                 compare' [] [] Nothing = EQ 
@@ -94,13 +98,13 @@ instance Ord NumberedColumn where
                                 compare' [] [] (Just ans) = ans 
 
                                 --first gap on left side -> set arbitrary answer and keep looking for base-base pairs
-                                compare' (('-',i):xs) ((y,j):ys) Nothing | y/='-' = compare' xs ys (Just GT)
-                                compare' ((x,i):xs) (('-',j):ys) Nothing | x/='-'= compare' xs ys (Just LT)
-                                compare' (('-',i):xs) (('-',j):ys) ans = compare' xs ys ans
+                                compare' ((gap,i):xs) ((y,j):ys) Nothing | (isGap gap) && (not $ isGap y) = compare' xs ys (Just GT)
+                                compare' ((x,i):xs) ((gap,j):ys) Nothing | (isGap gap) && (not $ isGap x) = compare' xs ys (Just LT)
+                                compare' ((gap1,i):xs) ((gap2,j):ys) ans | (isGap gap1) && (isGap gap2) =  compare' xs ys ans
 
                                 --gap-base or base gap with existing ordering
-                                compare' (('-',i):xs) ((y,j):ys) ans = compare' xs ys ans
-                                compare' ((x,i):xs) (('-',j):ys) ans = compare' xs ys ans
+                                compare' ((gap,i):xs) ((y,j):ys) ans | (isGap gap) = compare' xs ys ans
+                                compare' ((x,i):xs) ((gap,j):ys) ans | (isGap gap) = compare' xs ys ans
 
 sortAlignment :: ListAlignment -> ListAlignment
 sortAlignment (ListAlignment names seqs cols) = ListAlignment names (transpose ans) ans where
@@ -136,9 +140,9 @@ gapPos' :: Sequence -> [(Int,Int)] -> (Maybe Int) -> Int -> [(Int,Int)]
 gapPos' [] list Nothing pos = list 
 gapPos' [] list (Just i) pos = (pos,i):list
 --open a gap
-gapPos' ('-':xs) list Nothing pos = gapPos' xs list (Just 1) (pos) 
+gapPos' (gap:xs) list Nothing pos | isGap gap = gapPos' xs list (Just 1) (pos) 
 --extend a gap
-gapPos' ('-':xs) list (Just i) pos = gapPos' xs list (Just (i+1)) (pos)
+gapPos' (gap:xs) list (Just i) pos | isGap gap = gapPos' xs list (Just (i+1)) (pos)
 --close a gap
 gapPos' (x:xs) list (Just i) pos = gapPos' xs ((pos,i):list) Nothing (pos+1)
 --no gap
@@ -174,13 +178,13 @@ removeAllGaps' :: [Column] -> [Column]
 removeAllGaps' = filter notAllGap where 
  
 notAllGap :: Column -> Bool
-notAllGap ('-':[]) = False
-notAllGap ('-':xs) = notAllGap xs
+notAllGap (gap:[]) | isGap gap = False
+notAllGap (gap:xs) | isGap gap = notAllGap xs
 notAllGap (x:xs) = True
 
 hasGap :: Column -> Bool
 hasGap [] = False
-hasGap ('-':xs) = True
+hasGap (gap:xs) | isGap gap = True
 hasGap (x:xs) = hasGap xs
 
 
@@ -199,7 +203,7 @@ numberifyBasic aln = map nfy myseqs where
         myseqs = sequences aln
         nfy = numberMap 0
         numberMap i [] = []
-        numberMap i ('-':xs) = -1 : numberMap i xs
+        numberMap i (gap:xs) |isGap gap = -1 : numberMap i xs
         numberMap i (x:xs) = i : numberMap (i+1) xs
 
 numberifyGap :: ListAlignment -> [[Int]]
@@ -207,7 +211,7 @@ numberifyGap aln = map nfy myseqs where
         myseqs = sequences aln
         nfy = numberMap 0
         numberMap i [] = []
-        numberMap i ('-':xs) = (-(i+1)) : numberMap i xs
+        numberMap i (gap:xs) | isGap gap = (-(i+1)) : numberMap i xs
         numberMap i (x:xs) = i : numberMap (i+1) xs
 
 numberifyGapTree :: Node -> ListAlignment -> [[(Int,Maybe Node)]]
@@ -219,11 +223,11 @@ numberifyGapTree tree aln = transpose $ nfy (columns aln) where
         numberMap y (x:xs) = (snd ans) : (numberMap (fst ans) xs) where
                               ans = numberMap' y x $ names aln
                               gapNums = unrootedSplitsFor tree gapNames
-                              gapNames = map (\x-> fst x) $ filter (\t -> (snd t)=='-') $ zip (names aln) x
+                              gapNames = map (\x-> fst x) $ filter (\t -> isGap (snd t)) $ zip (names aln) x
                               numberMap':: [Int] -> Column -> [String] -> ([Int],[(Int,Maybe Node)]) 
                               numberMap' [] [] [] = ([],[])
 
-                              numberMap' (a:as) ('-':bs) (name:cs) = (a:(fst ans2),((-a-1,Just $ getNode name)):(snd ans2)) where
+                              numberMap' (a:as) (gap:bs) (name:cs) | isGap gap = (a:(fst ans2),((-a-1,Just $ getNode name)):(snd ans2)) where
                                                                                              ans2 = numberMap' as bs cs
                               numberMap' (a:as) (b:bs) (name:cs) = (a+1:(fst ans2),(a,Nothing):(snd ans2)) where
                                                                                              ans2 = numberMap' as bs cs
