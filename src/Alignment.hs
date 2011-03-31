@@ -18,7 +18,7 @@ parseFasta' ((name,""):(name2,seq2):(name3,seq3):xs) bs | ((length seq2) /= (len
 parseFasta' old [] =  old
 parseFasta' old bs =  case L.unpack (L.take 1 (head bs)) of 
                       ['>'] -> parseFasta' ((trim $ L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
-                      _ -> parseFasta' (appendString old (L.unpack (head bs))) $ tail bs 
+                      _ -> parseFasta' (appendString old $ trim (L.unpack (head bs))) $ tail bs 
 
 parseFasta :: Monad m => [L.ByteString] -> m [(String,String)]
 parseFasta input = return $ parseFasta' [] input 
