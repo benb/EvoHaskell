@@ -28,15 +28,15 @@ isPermutation a b = (dropGaps a) == (dropGaps b)
 
 
 genDist :: (ListAlignment -> [[(Int)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
-genDist f = tupDist (tupify f Just)
+genDist f = tupDist (siteLabel f Just)
 
-zeroDist f = tupDistTrig (tupify f (\x->Nothing))
+zeroDist f = tupDistTrig (siteLabel f (\x->Nothing))
                         
-tupify :: (ListAlignment -> [[(Int)]]) -> (Int->Maybe Int) -> (ListAlignment -> [[(Int,Maybe Int)]])
-tupify f gapHandler = fmap (map (map toTup)) f where 
-        toTup i = if (i < 0) then
+siteLabel :: (ListAlignment -> [[(Int)]]) -> (Int->Maybe Int) -> (ListAlignment -> [[(Int,Maybe Int)]])
+siteLabel f gapHandler = fmap (map (map toLabel)) f where 
+        toLabel i = if (i < 0) then
                         (i,gapHandler i)
-                  else 
+                    else 
                         (i,Nothing)
 
 class (Eq a, Show a) => SiteLabel a where 
