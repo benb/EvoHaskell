@@ -201,7 +201,7 @@ hasGap (x:xs) = hasGap xs
                         
 numberifyBasic :: ListAlignment -> [[Int]]
 numberifyBasic aln = map nfy myseqs where
-        myseqs = trace (show $ sequences aln) $ sequences aln
+        myseqs = sequences aln
         nfy = numberMap 0
         numberMap i [] = []
         numberMap i (gap:xs) |isGapChar gap = -1 : numberMap i xs
