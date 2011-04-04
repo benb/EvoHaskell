@@ -161,6 +161,8 @@ instance Eq ListAlignment where
 quickListAlignment :: [Name] -> [Sequence] -> ListAlignment
 quickListAlignment names sequences = ListAlignment names sequences (transpose sequences)
 
+safeListAlignment names sequences = removeAllGaps $ quickListAlignment names sequences
+
 fromColumnListAlignment :: [Name] -> [Column] -> ListAlignment
 fromColumnListAlignment names cols = ListAlignment names (transpose cols) cols
 

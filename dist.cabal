@@ -14,7 +14,11 @@ Build-Type:     Simple
 Executable alndist
         Main-Is: AlnDist.hs
         HS-Source-Dirs: src
-library
-        Exposed-Modules: Alignment, Alignment.Dist, Tree
+Executable alndistset
+        Main-Is: AlnDistSet.hs
         HS-Source-Dirs: src
-        Build-Depends: bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0,  base >= 3
+
+library
+        Exposed-Modules: Alignment, Alignment.Dist, Alignment.DistSet, Alignment.Test, Tree
+        HS-Source-Dirs: src
+        Build-Depends: bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3

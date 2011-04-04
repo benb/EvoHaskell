@@ -14,6 +14,11 @@ data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double |
 instance Show Node where
         show = toNewick
 
+--hack!
+instance Ord Node where
+        (<) a b = False
+        (>) a b = False
+
 data PNode = PLeaf {pname :: String, pdistance :: Double } | PINode [PNode] Double | PTree [PNode] deriving Show
 
 
