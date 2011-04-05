@@ -10,12 +10,12 @@ import qualified Data.HashMap as HM
 
 appendString :: [(String,String)] -> String -> [(String, String)]
 appendString old add = case  old of 
-                (name,x):xs -> (name,(x++add)):xs
+                (name,x):xs -> (name,x++add):xs
 
 --Fasta format
 parseFasta' :: [(String,String)] -> [L.ByteString] -> [(String,String)]
 --this is an inefficient way to check that this alignment will be valid
-parseFasta' ((name,""):(name2,seq2):(name3,seq3):xs) bs | ((length seq2) /= (length seq3)) = error $ "lengths of sequences " ++ name2 ++ " and " ++ name3 ++ " don't match"
+parseFasta' ((name,""):(name2,seq2):(name3,seq3):xs) bs | (length seq2) /= (length seq3) = error $ "lengths of sequences " ++ name2 ++ " and " ++ name3 ++ " don't match"
 parseFasta' old [] =  old
 parseFasta' old bs =  case L.unpack (L.take 1 (head bs)) of 
                       ['>'] -> parseFasta' ((trim $ L.unpack (L.drop 1 (head bs)),"") : old) $ tail bs
@@ -31,7 +31,7 @@ trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 parseAlignmentString :: Monad m =>  ([L.ByteString] -> m [(String,String)]) -> L.ByteString -> m ListAlignment
 
-parseAlignmentString parser input = ((liftM2 quickListAlignment) names seqs) where 
+parseAlignmentString parser input = (liftM2 quickListAlignment names seqs) where 
                                 mydata = (liftM $ sortBy sortX) (parser (L.lines input))
                                 sortX (a,b) (c,d) = compare a c
                                 names = (liftM $ map fst) mydata
@@ -240,6 +240,6 @@ numberifyGapTree tree aln = transpose $ nfy (columns aln) where
                                 Just a -> a
 
 compatible :: Node -> ListAlignment -> Bool
-compatible tree aln = (sort $ Tree.names tree) == (names aln)
+compatible tree aln = (sort $ Tree.names tree) == names aln
 
 
