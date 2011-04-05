@@ -31,7 +31,7 @@ trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 parseAlignmentString :: Monad m =>  ([L.ByteString] -> m [(String,String)]) -> L.ByteString -> m ListAlignment
 
-parseAlignmentString parser input = (liftM2 quickListAlignment names seqs) where 
+parseAlignmentString parser input = (liftM2 safeListAlignment names seqs) where 
                                 mydata = (liftM $ sortBy sortX) (parser (L.lines input))
                                 sortX (a,b) (c,d) = compare a c
                                 names = (liftM $ map fst) mydata
