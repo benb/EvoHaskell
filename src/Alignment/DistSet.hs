@@ -1,6 +1,7 @@
 module Alignment.DistSet where
 import Alignment
 import Debug.Trace
+import Data.List
 import qualified Data.Set as Set
 
 
@@ -43,13 +44,12 @@ instance (Integral a, Eq b, Show b,Ord a) => SiteLabel (a,b) where
 -- and returns a a tuple of (denonimator,numerator), i.e. distance is
 -- snd/fst
 labDist :: (Ord a,SiteLabel a) => ([[(a,Int)]] -> [[[((a,Int),(a,Int))]]]) -> (Set.Set ((a,Int),(a,Int))-> Set.Set ((a,Int),(a,Int)) -> (Int,Int)) -> (ListAlignment -> [[(a)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
-labDist pairFunc distFunc numF aln1 aln2 | trace "Set Distances " False = undefined
 labDist pairFunc distFunc numF aln1 aln2 = distFunc set1 set2 where
                            setLabel :: [[a]] -> Int -> [[(a,Int)]]
                            setLabel [] i = []
                            setLabel (x:xs) i = (map (\f -> (f,i)) x) :  (setLabel xs (i+1))
-                           set1 = (toSet (pairFunc (setLabel (numF aln1) 0)))
-                           set2 = (toSet (pairFunc (setLabel (numF aln2) 0)))
+                           set1 = toSet $ pairFunc (setLabel (numF aln1) 0)
+                           set2 = toSet $ pairFunc (setLabel (numF aln2) 0)
                            toSet (x:xs) = (toSet2 x) `Set.union` (toSet xs)
                            toSet [] = Set.fromList []
                            toSet1 (x:xs) = (toSet2 x) `Set.union` (toSet1 xs)
@@ -77,4 +77,5 @@ setDist :: (SiteLabel a, Ord a) => Set.Set ((a,Int),(a,Int))-> Set.Set ((a,Int),
 --setDist a b | trace (show b) False = undefined
 setDist a b = ((Set.size a)+(Set.size b),Set.size ((a Set.\\ b) `Set.union` (b Set.\\ a)))
 
-setDistZero a b = ((Set.size $ a `Set.union` b), Set.size ((a Set.\\ b) `Set.union` (b Set.\\ a)))
+--setDistZero a b | trace (unlines (map show $ Set.toList ((a Set.\\ b) `Set.union` (b Set.\\ a)))) False = undefined 
+setDistZero a b = ((Set.size $ a `Set.union` b), (Set.size $ a `Set.union` b) - (Set.size $ a `Set.intersection` b)) -- ((a Set.\\ b) `Set.union` (b Set.\\ a)))
