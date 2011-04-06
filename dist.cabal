@@ -17,6 +17,9 @@ Executable alndist
 Executable alndistset
         Main-Is: AlnDistSet.hs
         HS-Source-Dirs: src
+Executable seqcat
+        Main-Is: SeqCat.hs
+        HS-Source-Dirs: src
 
 library
         Exposed-Modules: Alignment, Alignment.Dist, Alignment.DistSet, Alignment.Test, Tree
