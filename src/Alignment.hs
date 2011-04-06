@@ -86,7 +86,22 @@ type Name = String
 type Sequence = [Char]
 type Column = [Char]
 
+bsort :: Ord a => [a] -> [a]
+bsort s = case _bsort s of
+               t | t == s    -> t
+                 | otherwise -> bsort t
+          where _bsort (x:x2:xs) | x > x2    = x2:(_bsort (x:xs))
+                                 | otherwise = x:(_bsort (x2:xs))
+                _bsort s = s
+
 data NumberedColumn = NumberedColumn {coldata::[(Char,Int)]} deriving (Eq)
+
+--This is not a real Ord
+--It will only work with neighbour-neighbour comparisons from the starting alignment
+--Hence - use Bubble Sort
+--A real Ord impl would require each pair of columns to be examined in the 
+--Context of the whole alignment
+
 instance Ord NumberedColumn where 
                        compare (NumberedColumn x) (NumberedColumn y) = compare' x y Nothing where
                                 --maintain sequence ordering
@@ -96,29 +111,20 @@ instance Ord NumberedColumn where
                                 compare' [] [] Nothing = EQ 
 
                                 -- all pairs are gap-base or base-gap --> arbitrary
-                                compare' [] [] (Just ans) = ans 
+                                compare' [] [] (Just ans) = ans
 
                                 --first gap on left side -> set arbitrary answer and keep looking for base-base pairs
                                 compare' ((gap,i):xs) ((y,j):ys) Nothing | (isGapChar gap) && (not $ isGapChar y) = compare' xs ys (Just GT)
                                 compare' ((x,i):xs) ((gap,j):ys) Nothing | (isGapChar gap) && (not $ isGapChar x) = compare' xs ys (Just LT)
-                                compare' ((gap1,i):xs) ((gap2,j):ys) ans | (isGapChar gap1) && (isGapChar gap2) =  compare' xs ys ans
 
-                                --gap-base or base gap with existing ordering
-                                compare' ((gap,i):xs) ((y,j):ys) ans | (isGapChar gap) = compare' xs ys ans
-                                compare' ((x,i):xs) ((gap,j):ys) ans | (isGapChar gap) = compare' xs ys ans
+                                --existing ordering
+                                compare' (x:xs) (y:ys) ans = compare' xs ys ans
 
-sortAlignment :: ListAlignment -> ListAlignment
 sortAlignment (ListAlignment names seqs cols) = ListAlignment names (transpose ans) ans where
                                                   numbers = transpose $ numberifyBasic $ ListAlignment names seqs cols
                                                   numbCols = map NumberedColumn $ map (\(a,b)-> zip a b) $ zip cols numbers
-                                                  reordered = sort numbCols
+                                                  reordered = bsort numbCols
                                                   ans = map (map fst) (map coldata reordered)
-
-
-
-                                                
-
-
 
 gapPos :: Sequence -> [(Int,Int)]
 gapPos s = gapPos' s [] Nothing 0
