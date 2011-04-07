@@ -10,10 +10,10 @@ import Text.Printf
 
 main  = mapM_ (\(s,a) -> printf "%-25s: " s >> a) alltests 
 
-deepCheck = quickCheckWith (stdArgs { maxSuccess = 1000})
+--deepCheck = quickCheckWith (stdArgs { maxSuccess = 1000})
 
 
-alltests = [("sort",deepCheck prop_sortaln),
+alltests = [("sort",quickCheck prop_sortaln),
             ("nonneg",quickCheck prop_nonneg),
             ("discriminant",quickCheck prop_disc),
             ("symmetric",quickCheck prop_sym),
