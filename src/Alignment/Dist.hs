@@ -88,15 +88,18 @@ labDistSeq f seqA seqB [] [] ans = ans
        
 -- | compute distance for pairs of labels 
 diffIn :: (SiteLabel a) => [a] -> [a] -> [a] -> [a] -> (Int,Int) -> (Int,Int)
+diffIn x1s x2s y1s y2s t = addT t $ diffIn' x1s x2s y1s y2s 
 --diffIn (x:xs) (y:ys) ans | trace ((show x) ++ (show y) ++ (show ans)) False = undefined
 --First, skip gaps on left side of xs and ys
-diffIn (x1:x1s) (x2:x2s) y1s y2s (i,j) | (isGap x1) = i `seq` j `seq` diffIn x1s x2s y1s y2s (i,j)
-diffIn x1s x2s (y1:y1s) (y2:y2s) (i,j) | (isGap y1) = i `seq` j `seq` diffIn x1s x2s y1s y2s (i,j)
+diffIn' (x1:x1s) (x2:x2s) y1s y2s  | (isGap x1) = diffIn' x1s x2s y1s y2s
+diffIn' x1s x2s (y1:y1s) (y2:y2s)  | (isGap y1) = diffIn' x1s x2s y1s y2s 
 --Same
-diffIn (x1:x1s) (x2:x2s) (y1:y1s) (y2:y2s) (i,j) | x2==y2  = i `seq` j `seq` diffIn x1s x2s y1s y2s (i+2,j)
+diffIn' (x1:x1s) (x2:x2s) (y1:y1s) (y2:y2s) | x2==y2  = addT (2,0) $ diffIn' x1s x2s y1s y2s 
 --Different
-                                                 | otherwise = i `seq` j `seq` diffIn x1s x2s y1s y2s (i+2,j+2)
-diffIn [] [] [] [] t = t
+                                            | otherwise = addT (2,2) $ diffIn' x1s x2s y1s y2s 
+diffIn' [] [] [] [] = (0,0)
+
+addT (i,j) (i2,j2) = (i+i2,j+j2)
 
 
 
