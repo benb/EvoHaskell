@@ -1,4 +1,5 @@
-import System.Environment (getArgs)
+import System.Environment (getArgs,getProgName)
+import System.IO
 import Alignment
 import Tree
 import Alignment.Dist
@@ -7,49 +8,52 @@ import System.Console.GetOpt
 import Numeric
 import Control.Monad
 
+data Options = Options  { optVersion    :: Bool
+                        , optFunc       :: ListAlignment -> ListAlignment -> Either String (Int,Int)
+}
+
+options :: [ OptDescr (Options -> IO Options) ]
+options = [ Option ['g'] ["gap"] (NoArg (\opt-> return opt {optFunc = safeCompare homGapDist})) "Homolgy distance with labelled gaps",
+            Option ['n','s'] ["ssp"] (NoArg (\opt -> return opt {optFunc = safeCompare hom0Dist})) "Symmetrised Sum-Of-Pairs",
+            Option ['h'] ["hom"] (NoArg (\opt -> return opt {optFunc = safeCompare homDist})) "Homology distance (default)",
+            Option ['t'] ["tree"] (ReqArg (\arg opt -> do treeIO <- (liftM readBiNewickTree) (readFile arg)
+                                                          let tree = case treeIO of
+                                                                       Right t -> t
+                                                                       Left err -> error err
+                                                          return $ opt {optFunc = (safeTreeCompare homTreeDist tree)}) "TREE" )
+            "Homology distance with tree-labelled gaps"
+          ]
+safeCompare :: (ListAlignment -> ListAlignment -> (Int,Int)) -> ListAlignment -> ListAlignment -> Either String (Int,Int)
+safeCompare dist aln1 aln2 = case compatibleAlignments aln1 aln2 of 
+                                        False -> Left "Incompatible alignments"
+                                        True -> Right $ dist aln1 aln2
+
+safeTreeCompare dist tree aln1 aln2 = case (compatible tree aln1) of
+                                        False -> Left "Tree is incompatible with first alignment"
+                                        True -> case (compatible tree aln2) of 
+                                                False -> Left "Tree is incompatible with second alignment"
+                                                True -> safeCompare (dist tree) aln1 aln2
+
+startOptions = Options {optVersion = False,
+                        optFunc = safeCompare homDist }
+
 main = do args <- getArgs
-          ans <- parseCommand args 
-          putStrLn ans
-          return ()
- 
-parseCommand :: [String] -> IO String
-parseCommand ("-g":xs) = Main.diff homGapDist xs
-parseCommand ("-n":xs) = Main.diff hom0Dist xs
-parseCommand ("-t":xs) = diffTree homTreeDist xs
-parseCommand xs = Main.diff homDist xs
-
-diffTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> [String] -> IO String
-diffTree dist (z:x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
-                              rawb <- parseAlignmentFile parseFasta y
-                              let a = fmap sortAlignment rawa
-                              let b = fmap sortAlignment rawb
-                              treeStr <- readFile z
-                              let t = readBiNewickTree treeStr
-                              return $ goTree dist ((liftM2 compatible) t a) ((liftM2 compatible) t b) t a b
-
-diffTree dist x = return usage
-
-usage = "Usage: alndist <-t> <tree> <-g> <-n> <fasta1> <fasta2>"
-
-diff :: (ListAlignment -> ListAlignment -> (Int,Int)) -> [String] -> IO String
-diff dist (x:y:xs) = do rawa <- parseAlignmentFile parseFasta x
-                        rawb <- parseAlignmentFile parseFasta y
-                        let a = fmap sortAlignment rawa
-                        let b = fmap sortAlignment rawb
-                        let ans = (liftM2 dist) a b
-                        case ans of 
-                                (Right (numPairs,numDiff)) -> return $ (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (show ((fromIntegral numDiff)/(fromIntegral numPairs)))
-                                (Left err) -> return err
-
-diff dist x = return usage
+          let (actions, nonOptions, errors)=getOpt Permute options args
+          opts <- foldl (>>=) (return startOptions) actions
+          let Options {optFunc = f} = opts
+          alignments <- mapM readAln nonOptions
+          me <- getProgName
+          case alignments of 
+               (x:y:[]) -> case (f x y) of 
+                                   Left err -> hPutStrLn stderr err
+                                   Right (d,n) -> putStrLn $ (show n) ++ " / " ++ (show d) ++ " = " ++ (show ((fromIntegral n)/(fromIntegral d)))
+               _        -> hPutStrLn stderr (usageInfo me options)
 
 
-goTree :: (Node->ListAlignment->ListAlignment->(Int,Int)) -> Either String Bool  -> Either String Bool -> Either String Node -> Either String ListAlignment -> Either String ListAlignment -> String
-goTree dist (Right False) x t a b = "Tree is incompatible with first alignment"
-goTree dist (Right True) (Right False) t a b = "Tree is incompatible with second alignment"
-goTree dist (Right True) (Right True) (Right t) (Right a) (Right b) = (show numDiff) ++ " / " ++ (show numPairs) ++ " = " ++ (show ((fromIntegral numDiff)/(fromIntegral numPairs))) 
-                                                                   where numPairs = fst ans
-                                                                         numDiff = snd ans
-                                                                         ans = dist t a b 
-goTree dist x y (Left err) a b = err
-goTree dist x y t (Left err) b = err
+
+readAln :: String -> IO ListAlignment
+readAln x = do rawa <- parseAlignmentFile parseFasta x
+               return $ case rawa of 
+                          Right aln -> aln
+                          Left err -> error err
+

@@ -248,4 +248,9 @@ numberifyGapTree tree aln = transpose $ nfy (columns aln) where
 compatible :: Node -> ListAlignment -> Bool
 compatible tree aln = (sort $ Tree.names tree) == names aln
 
-
+compatibleAlignments :: ListAlignment -> ListAlignment -> Bool
+compatibleAlignments x y = (names x == names y) && (or $ map compatSeq $ zip (sequences x) (sequences y)) where
+                               compatSeq ((x:xs),ys) | isGapChar x = compatSeq (xs,ys)
+                               compatSeq (xs,(y:ys)) | isGapChar y = compatSeq (xs,ys)
+                               compatSeq ((x:xs),(y:ys)) = x==y && compatSeq (xs,ys)
+                               compatSeq ([],[]) = True
