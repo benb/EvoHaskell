@@ -57,9 +57,10 @@ labDistTrig' (x:xs) (y:ys) (i,j) = i `seq` j `seq` labDistTrig' xs ys (labDistSe
 labDistTrig' [] [] t = t 
 
 
-labDistTrig numF aln1 aln2 =  labDistTrig' num1 num2 (0,0) where
+labDistTrig numF aln1 aln2 = (i+j,j) where
                                 num1 = numF aln1
                                 num2 = numF aln2
+                                (i,j) = labDistTrig' num1 num2 (0,0)
         
 
 -- |'labDist' computes the distance between two alignments after labelling
@@ -68,9 +69,10 @@ labDistTrig numF aln1 aln2 =  labDistTrig' num1 num2 (0,0) where
 -- snd/fst
 labDist :: (SiteLabel a) => (ListAlignment -> [[(a)]]) -> ListAlignment -> ListAlignment -> (Int,Int)
 labDist numF aln1 aln2 | trace "Fast dist" False  = undefined
-labDist numF aln1 aln2 =  labDist' num1 num2 [] [] (0,0) where
+labDist numF aln1 aln2 =  (i+j,j) where
                                 num1 = numF aln1
                                 num2 = numF aln2
+                                (i,j) = labDist' num1 num2 [] [] (0,0)
 
 -- |takes four lists (x, y, remaining_x and remaining_y) and a distance tuple
 -- and increments the distance tuple
@@ -95,7 +97,7 @@ diffIn x1s x2s (y1:y1s) (y2:y2s) (i,j) | (isGap y1) = i `seq` j `seq` diffIn x1s
 --Same
 diffIn (x1:x1s) (x2:x2s) (y1:y1s) (y2:y2s) (i,j) | x2==y2  = i `seq` j `seq` diffIn x1s x2s y1s y2s (i+2,j)
 --Different
-                                                 | otherwise = i `seq` j `seq` diffIn x1s x2s y1s y2s (i+2,j+2)
+                                                 | otherwise = i `seq` j `seq` diffIn x1s x2s y1s y2s (i,j+2)
 diffIn [] [] [] [] t = t
 
 
@@ -108,9 +110,9 @@ diffSSP x1s x2s (c:y1s) (d:y2s) (i,j) | isGap c || isGap d = diffSSP x1s x2s y1s
 --same
 --diffSSP (x:xs) (y:ys) (i,j) | trace ("Not gap" ++ (show x) ++ " , " ++  (show y) ++ " " ++ (show (i,j))) False = undefined
 diffSSP (a:x1s) (b:x2s) (c:y1s) (d:y2s) (i,j) | a==c && b==d = i `seq` j `seq` diffSSP x1s x2s y1s y2s (i+1,j) --same
-                                              | a==c = i `seq` j `seq` diffSSP x1s x2s y1s y2s (i+2,j+2) --different 
-                                              | a<c = i `seq` j `seq` diffSSP x1s x2s (c:y1s) (d:y2s) (i+1,j+1) --different 
-                                              | otherwise  = i `seq` j `seq` diffSSP (a:x1s) (b:x2s) y1s y2s (i+1,j+1) --different  a>c
+                                              | a==c = i `seq` j `seq` diffSSP x1s x2s y1s y2s (i,j+2) --different 
+                                              | a<c = i `seq` j `seq` diffSSP x1s x2s (c:y1s) (d:y2s) (i,j+1) --different 
+                                              | otherwise  = i `seq` j `seq` diffSSP (a:x1s) (b:x2s) y1s y2s (i,j+1) --different  a>c
 diffSSP [] [] [] [] (i,j) = (i,j)
-diffSSP (a:x1s) (b:x2s) [] [] (i,j) = diffSSP x1s x2s [] [] (i+1,j+1)
-diffSSP [] [] (c:y1s) (d:y2s) (i,j) = diffSSP [] [] y1s y2s (i+1,j+1)
+diffSSP (a:x1s) (b:x2s) [] [] (i,j) = diffSSP x1s x2s [] [] (i,j+1)
+diffSSP [] [] (c:y1s) (d:y2s) (i,j) = diffSSP [] [] y1s y2s (i,j+1)
