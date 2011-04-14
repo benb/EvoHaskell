@@ -1,6 +1,6 @@
 import System.Environment (getArgs)
 import System.Console.GetOpt
-import Alignment
+import Phylo.Alignment
 import Data.List
 import Control.Monad
 

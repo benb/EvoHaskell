@@ -11,17 +11,11 @@ Build-Type:     Simple
 --Executable homdist
 --        Main-Is: HomDist.hs
 --       HS-Source-Dirs: src
-Executable alndist
-        Main-Is: AlnDist.hs
-        HS-Source-Dirs: src
-Executable alndistset
-        Main-Is: AlnDistSet.hs
-        HS-Source-Dirs: src
 Executable seqcat
         Main-Is: SeqCat.hs
         HS-Source-Dirs: src
 
 library
-        Exposed-Modules: Alignment, Alignment.Dist, Alignment.DistSet, Alignment.Test, Tree
+        Exposed-Modules: Phylo.Alignment, Phylo.Tree
         HS-Source-Dirs: src
         Build-Depends: bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
