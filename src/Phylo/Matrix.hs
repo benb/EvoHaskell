@@ -1,6 +1,7 @@
 module Phylo.Matrix where
 import Numeric.LinearAlgebra.LAPACK
 import Numeric.LinearAlgebra.Algorithms
+import Numeric.LinearAlgebra
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.Packed.ST
@@ -9,15 +10,15 @@ import Debug.Trace
 
 
 makeQ matS pi = runSTMatrix $ do 
-                let rawQ = matS `multiplyR` (diagRect 0 pi (rows matS) (rows matS))
-                let rowTots = map (foldVector (+) 0) $ toRows (rawQ)
+                let rawQ = matS `multiplyR` (diag pi)
+                let rowTots = map (sumElements) $ toRows (rawQ)
                 q <- thawMatrix rawQ
                 let normRow (i,tot) = writeMatrix q i i (-tot)
                 mapM_ (normRow) $ zip [0..(rows rawQ)-1] rowTots
                 return q
 
 getRate :: Matrix Double -> Vector Double -> Double
-getRate matQ pi = -(foldVector (+) 0 $ zipVectorWith (*) (takeDiag matQ) pi)
+getRate matQ pi = -(sumElements $ zipVectorWith (*) (takeDiag matQ) pi)
 
 setRate rate matQ pi = matMult matQ (rate/oldRate) where
                          oldRate = getRate matQ pi
@@ -27,9 +28,8 @@ matMult q s = fromRows $ map (mapVector (*s)) $ toRows q
 normQ = setRate 1.0
 
 pT :: EigenS -> Double -> Matrix Double
-pT (right,lambda,left) t = right `multiplyR` (diagRect 0 lambdaT d d) `multiplyR` left where
+pT (right,lambda,left) t = right `multiplyR` (diag lambdaT) `multiplyR` left where
                                 lambdaT = mapVector (\x -> (exp (x*t))) lambda
-                                d = dim lambda
 
 type EigenS = (Matrix Double, Vector Double, Matrix Double)
 
@@ -42,10 +42,9 @@ eigQ matQ pi = (u,lambda,u') where
                u = piRt' `multiplyR` r
 
 matA matQ pi = ((piRt `multiplyR` matQ) `multiplyR` piRt',piRt,piRt') where
-                  piRt = diagRect 0 (mapVector sqrt pi) size size
+                  piRt = diag (mapVector sqrt pi)
                   invsqrt x = 1/(sqrt x) 
-                  piRt' = diagRect 0 (mapVector invsqrt pi) size size
-                  size = dim pi
+                  piRt' = diag (mapVector invsqrt pi)
 
 symS oldS = runSTMatrix $ do 
             let c = cols oldS
@@ -57,4 +56,3 @@ symS oldS = runSTMatrix $ do
             return s
 
 
-diag vec = diagRect 0 vec (dim vec) (dim vec)
