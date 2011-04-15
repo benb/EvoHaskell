@@ -2,11 +2,15 @@ module Phylo.Likelihood where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
-import Numeric.LinearAlgebra ((<>),(<.>))
+import Numeric.LinearAlgebra ((<>),(<.>),scale)
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.List
 import Data.Maybe
+import Statistics.Math
+import Numeric.GSL.Distribution.Continuous
+import Control.Exception as E
+
 
 partialLikelihood' ::  (Double -> [Vector Double] -> [Vector Double]) -> DNode -> [Vector Double]
 partialLikelihood' f (DLeaf name dist sequence partial) = f dist partial
@@ -23,11 +27,40 @@ partialLikelihoodCalc eig t pL = map (myPt <>) pL where
 partialLikelihood eigenS = partialLikelihood' $ partialLikelihoodCalc eigenS
                                         
 logLikelihood :: [Int] -> DNode -> Vector Double -> EigenS -> Double
-logLikelihood counts dataTree pi eigenS = foldr foldF 0 $ zip (map fromIntegral counts) likelihoods where
-                                             likelihoods = map (pi <.>) pL
-                                             pL = partialLikelihood eigenS dataTree
-                                             foldF :: (Double,Double) -> Double -> Double 
-                                             foldF (i,y) x = x + (i * (log y))
+logLikelihood counts dataTree pi eigenS = sumLikelihoods counts likelihoods where
+                                               likelihoods = map (pi <.>) pL
+                                               pL = partialLikelihood eigenS dataTree
+
+sumLikelihoods :: [Int] -> [Double] -> Double
+sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts) likelihoods where
+                                        foldF :: (Double,Double) -> Double -> Double 
+                                        foldF (i,y) x = x + (i * (log y))
+                                        
+
+logLikelihoodMixture counts dataTree priors pis eigenS = sumLikelihoods counts likelihoods where
+                                                                pLs = map (\x-> partialLikelihood x dataTree) eigenS
+                                                                likelihoodss = map (\(pi,pL)-> map (pi <.>) pL) $ zip pis pLs
+                                                                likelihoods = map summarise (transpose likelihoodss) 
+                                                                summarise lkl = sum $ zipWith (*) lkl priors
+
+gammaMix numCat alpha (u,lambda,u') = map (\s -> (u,scale s lambda,u')) scales where
+                           scales = gamma numCat alpha
+
+gamma :: Int -> Double -> [Double]
+gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl convergence errors (who wants >100 in the gamma dist anyway?)
+                   | otherwise       = map rK' [0..(numCat-1)] where
+                        alpha = shape
+                        beta = shape
+                        factor = alpha/beta*(fromIntegral numCat)
+
+                        freqK = map freqKf [0..(numCat-1)]
+                        freqKf i = incompleteGamma (alpha + 1.0) (beta * (gammaInvCDF (((fromIntegral i)+1.0)/(fromIntegral numCat))))
+
+                        rK' 0 = (head freqK) * factor
+                        rK' n | n < numCat = ((freqK!!n) - (freqK!!(n-1))) * factor
+                              | otherwise = factor * (1.0-(freqK!!(numCat-2)))
+                        gammaInvCDF p = (density_1p ChiSq UppInv (2.0*alpha) (1.0-p)) / (2.0*beta) -- (UppInv mysteriously has more stable convergence)
+
 
 data PatternAlignment = PatternAlignment {names :: [String], seqs::[String], columns::[String], patterns::[String], counts::[Int]}
 
