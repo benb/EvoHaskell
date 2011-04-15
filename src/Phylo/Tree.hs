@@ -8,6 +8,7 @@ import Text.ParserCombinators.Parsec.Token
 import Text.ParserCombinators.Parsec.Language
 import qualified Data.HashMap as HM
 import Data.List
+import Data.Packed.Vector
 import Control.Monad.Error
 
 data Node = Leaf {name :: String,distance :: Double } | INode Node Node Double | Tree Node Node deriving (Eq) 
@@ -159,3 +160,6 @@ splitsFor' (INode left right dist) startMap remaining = (go left right (go right
                                                        reduced = remaining \\ (names r)
 
 splitsFor' leaf startMap remaining = error $ "Tree and Alignment are not congruent: Can't find leaf " ++ (head (remaining \\ (names leaf))) ++ " in tree"
+
+
+data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,likelihoods::[Vector Double]} | DINode DNode DNode Double | DTree DNode DNode deriving (Eq) 

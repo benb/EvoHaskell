@@ -14,8 +14,10 @@ Build-Type:     Simple
 Executable seqcat
         Main-Is: SeqCat.hs
         HS-Source-Dirs: src
-
+Executable calclkl
+        Main-Is: CalcLkl.hs
+        HS-Source-Dirs: src
 library
-        Exposed-Modules: Phylo.Alignment, Phylo.Tree, Phylo.Data, Phylo.Matrix
+        Exposed-Modules: Phylo.Alignment, Phylo.Tree, Phylo.Data, Phylo.Matrix, Phylo.Likelihood
         HS-Source-Dirs: src
         Build-Depends: hmatrix >= 0.11.0.4, bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
