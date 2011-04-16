@@ -2,7 +2,7 @@ module Phylo.Likelihood where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
-import Numeric.LinearAlgebra ((<>),(<.>),scale)
+import Numeric.LinearAlgebra ((<>),(<.>),scale,mul)
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.List
@@ -12,26 +12,26 @@ import Numeric.GSL.Distribution.Continuous
 import Control.Exception as E
 
 
-partialLikelihood' ::  (Double -> [Vector Double] -> [Vector Double]) -> DNode -> [Vector Double]
+partialLikelihood' ::  (Double -> Matrix Double -> Matrix Double) -> DNode -> Matrix Double
 partialLikelihood' f (DLeaf name dist sequence partial) = f dist partial
 partialLikelihood' f (DINode c1 c2 dist) = f dist $ combinePartial (partialLikelihood' f c1) (partialLikelihood' f c2)
 partialLikelihood' f (DTree c1 c2) = combinePartial (partialLikelihood' f c1) (partialLikelihood' f c2)
 
-combinePartial :: [Vector Double] -> [Vector Double] -> [Vector Double]
-combinePartial a b = zipWith (zipVectorWith (*)) a b
+combinePartial :: Matrix Double -> Matrix Double -> Matrix Double
+combinePartial a b = mul a b
+combinePartial' :: [Vector Double] -> [Vector Double] -> [Vector Double]
+combinePartial' a b = zipWith (zipVectorWith (*)) a b
 
-partialLikelihoodCalc :: EigenS -> Double -> [Vector Double] -> [Vector Double]
---partialLikelihoodCalc eig t pL = toRows $ trans $ myPt <> (trans mypL) where
---                                        myPt = pT eig t
---                                        mypL = fromRows pL
- 
-partialLikelihoodCalc eig t pL = map (myPt <>) pL where
+partialLikelihoodCalc :: EigenS -> Double -> Matrix Double -> Matrix Double
+partialLikelihoodCalc eig t mypL = myPt <> mypL where
                                         myPt = pT eig t
+ 
+partialLikelihood :: EigenS ->  DNode -> Matrix Double
 partialLikelihood eigenS = partialLikelihood' $ partialLikelihoodCalc eigenS
                                         
 logLikelihood :: [Int] -> DNode -> Vector Double -> EigenS -> Double
 logLikelihood counts dataTree pi eigenS = sumLikelihoods counts likelihoods where
-                                               likelihoods = map (pi <.>) pL
+                                               likelihoods = toList $ pi <> pL
                                                pL = partialLikelihood eigenS dataTree
 
 sumLikelihoods :: [Int] -> [Double] -> Double
@@ -42,7 +42,7 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
 
 logLikelihoodMixture counts dataTree priors pis eigenS = sumLikelihoods counts likelihoods where
                                                                 pLs = map (\x-> partialLikelihood x dataTree) eigenS
-                                                                likelihoodss = map (\(pi,pL)-> map (pi <.>) pL) $ zip pis pLs
+                                                                likelihoodss = map (\(pi,pL)-> toList $ pi <> pL) $ zip pis pLs
                                                                 likelihoods = map summarise (transpose likelihoodss) 
                                                                 summarise lkl = sum $ zipWith (*) lkl priors
 
@@ -80,10 +80,12 @@ structData hiddenClasses seqDataType (PatternAlignment names seqs columns patter
                                                                                                                         pA = PatternAlignment names seqs columns patterns counts
 
 data SeqDataType = AminoAcid | Nucleotide
-getPartial :: Int -> SeqDataType -> String -> [Vector Double]
-getPartial _ _ [] = []
-getPartial classes AminoAcid (x:xs) = (aaPartial classes x):(getPartial classes AminoAcid xs)
-getPartial classes Nucleotide (x:xs) = error "Nucleotides unimplemented"
+getPartial :: Int -> SeqDataType -> String -> Matrix Double
+getPartial a b c = trans $ fromRows $ getPartial' a b c
+getPartial' :: Int -> SeqDataType -> String -> [Vector Double]
+getPartial' _ _ [] = []
+getPartial' classes AminoAcid (x:xs) = (aaPartial classes x):(getPartial' classes AminoAcid xs)
+getPartial' classes Nucleotide (x:xs) = error "Nucleotides unimplemented"
 
 aaOrder = ['A','R','N','D','C','Q','E','G','H','I','L','K','M','F','P','S','T','W','Y','V']
 aaPartial classes x | isGapChar x = buildVector (20*classes) (\i->1.0) 
