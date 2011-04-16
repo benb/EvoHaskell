@@ -93,7 +93,24 @@ quickLkl aln tree pi s = logLikelihood patcounts dTree pi eigenS where
                                 dTree = structData 1 AminoAcid pAln transpats tree
                                 pAln = pAlignment aln
                                 transpats = transpose $ patterns pAln
-                                qMat = normQ (makeQ s pi) pi 
-                                eigenS = eigQ qMat pi
+                                eigenS = quickEigen pi s
                                 patcounts = counts pAln
+
+quickGamma' numCat patcounts dataTree priors pi eigenS alpha = logLikelihoodMixture patcounts dataTree priors (repeat pi) eigenSs where
+                                                        eigenSs = gammaMix numCat alpha eigenS
+
+quickGamma numCat alpha aln tree pi s  = optGammaF numCat aln tree pi s alpha
+
+                                                
+quickEigen pi s = eigQ (normQ (makeQ s pi) pi) pi
+
+
+optGammaF :: Int -> ListAlignment -> Node -> Vector Double -> Matrix Double -> (Double -> Double)
+optGammaF numCat aln tree pi s = quickGamma' numCat patcounts dataTree priors pi eigenS where
+                                                dataTree = structData 1 AminoAcid pAln transpats tree
+                                                pAln = pAlignment aln
+                                                transpats = transpose $ patterns pAln
+                                                priors = take numCat $ repeat (1.0/(fromIntegral numCat))
+                                                eigenS = quickEigen pi s
+                                                patcounts = counts pAln
 

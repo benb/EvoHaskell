@@ -6,21 +6,29 @@ import Control.Monad
 import Phylo.Tree
 import Phylo.Data
 import Phylo.Likelihood
+import Phylo.Opt
 
 
-data Flag = AlignmentFile String | TreeFile String
+data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
-            Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree" ]
+            Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
+            Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
+            Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model" ]
 
 main = do args <- getArgs
-          (aln,tree) <- case getOpt Permute options args of 
-                         (((AlignmentFile aln):(TreeFile tre):[]),[],[]) -> do aln <- parseAlignmentFile parseFasta aln
+          (aln,tree,remainOpts) <- case getOpt Permute options args of 
+                         (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseFasta aln
                                                                                tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                               return (aln,tree)
+                                                                               return (aln,tree,xs)
                          (_,_,msgs) -> error $ concat msgs
-          case (aln,tree) of 
-                (Just a,Right t)-> putStrLn $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (_,_) -> error "Can't parse something"
+          case (aln,tree,remainOpts) of 
+                (Just a,Right t,[])-> putStrLn $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
+                (Just a,Right t,(Alpha val):[])-> putStrLn $ "WAG Gamma lkl:" ++ (show $ quickGamma 4 (read val) a t wagPi wagS)
+                (Just a,Right t,(OptAlpha):[])-> putStrLn $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
+                                                        f = optGammaF 4 a t wagPi wagS
+                                                        alpha = goldenSection 0.001 0.02 99.0 (\x -> -(f x))
+                                                        lkl = f alpha
+                (_,_,_) -> error "Can't parse something"
 
  
 
