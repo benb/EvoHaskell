@@ -10,17 +10,21 @@ import Data.Maybe
 import Statistics.Math
 import Numeric.GSL.Distribution.Continuous
 import Control.Exception as E
+import Control.Parallel
+import Control.Parallel.Strategies
 
 
 partialLikelihood' ::  (Double -> Matrix Double -> Matrix Double) -> DNode -> Matrix Double
 partialLikelihood' f (DLeaf name dist sequence partial) = f dist partial
-partialLikelihood' f (DINode c1 c2 dist) = f dist $ combinePartial (partialLikelihood' f c1) (partialLikelihood' f c2)
-partialLikelihood' f (DTree c1 c2) = combinePartial (partialLikelihood' f c1) (partialLikelihood' f c2)
+partialLikelihood' f (DINode c1 c2 dist) = par p1 $ f dist $ combinePartial p1 p2 where
+                                                p1 = partialLikelihood' f c1
+                                                p2 = partialLikelihood' f c2
+partialLikelihood' f (DTree c1 c2) = par p1 $ combinePartial p1 p2 where
+                                                p1 = partialLikelihood' f c1
+                                                p2 = partialLikelihood' f c2
 
 combinePartial :: Matrix Double -> Matrix Double -> Matrix Double
-combinePartial a b = mul a b
-combinePartial' :: [Vector Double] -> [Vector Double] -> [Vector Double]
-combinePartial' a b = zipWith (zipVectorWith (*)) a b
+combinePartial = mul 
 
 partialLikelihoodCalc :: EigenS -> Double -> Matrix Double -> Matrix Double
 partialLikelihoodCalc eig t mypL = myPt <> mypL where
@@ -41,8 +45,8 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
                                         
 
 logLikelihoodMixture counts dataTree priors pis eigenS = sumLikelihoods counts likelihoods where
-                                                                pLs = map (\x-> partialLikelihood x dataTree) eigenS
-                                                                likelihoodss = map (\(pi,pL)-> toList $ pi <> pL) $ zip pis pLs
+                                                                pLs = (parMap rseq) (\x-> partialLikelihood x dataTree) eigenS
+                                                                likelihoodss = (parMap rseq) (\(pi,pL)-> toList $ pi <> pL) $ zip pis pLs
                                                                 likelihoods = map summarise (transpose likelihoodss) 
                                                                 summarise lkl = sum $ zipWith (*) lkl priors
 
