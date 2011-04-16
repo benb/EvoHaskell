@@ -21,9 +21,12 @@ combinePartial :: [Vector Double] -> [Vector Double] -> [Vector Double]
 combinePartial a b = zipWith (zipVectorWith (*)) a b
 
 partialLikelihoodCalc :: EigenS -> Double -> [Vector Double] -> [Vector Double]
+--partialLikelihoodCalc eig t pL = toRows $ trans $ myPt <> (trans mypL) where
+--                                        myPt = pT eig t
+--                                        mypL = fromRows pL
+ 
 partialLikelihoodCalc eig t pL = map (myPt <>) pL where
                                         myPt = pT eig t
-
 partialLikelihood eigenS = partialLikelihood' $ partialLikelihoodCalc eigenS
                                         
 logLikelihood :: [Int] -> DNode -> Vector Double -> EigenS -> Double
