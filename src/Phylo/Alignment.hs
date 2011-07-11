@@ -7,6 +7,7 @@ import Data.List
 import Data.Char
 import Debug.Trace
 import qualified Data.HashMap as HM
+import Text.JSON
 
 appendString :: [(String,String)] -> String -> [(String, String)]
 appendString old add = case  old of 
@@ -41,6 +42,14 @@ parseAlignmentString parser input = (liftM2 safeListAlignment names seqs) where
 parseAlignmentFile :: Monad m => ([L.ByteString] -> m [(String,String)]) -> String -> IO (m ListAlignment)
 parseAlignmentFile parser name = parseAlignmentString parser `liftM` (L.readFile name)
 
+parseUniversal :: Monad m => [L.ByteString] -> m [(String,String)]
+parseUniversal (x:xs) = case x of 
+                              str | str==L.empty -> parseUniversal xs
+                                  | L.isPrefixOf (L.pack ">") str -> parseFasta (x:xs)
+                                  | otherwise -> parsePhylip(x:xs)
+
+                                
+
 --"relaxed" phylip format
 
 parsePhylip :: Monad m =>  [L.ByteString] -> m [(String,String)]
@@ -60,12 +69,15 @@ parsePhylipHeader (x:xs)  = (case (ans,nChar) of
                                 nChar = fmap fst t2
                                 ans = fmap (\x -> parsePhylipBody x x [] xs) nTaxa
 
-parsePhylipBody nTaxa 0 output (x:xs) = parsePhylipBody' xs [] $ reverse output
+--parsePhylipBody nTaxa remaining output xs | trace ((show nTaxa) ++ " " ++ (show remaining) ++ " " ++ (show $  length xs) ++ (show (take 1 xs)) ++ (show output)) False  = undefined
+parsePhylipBody nTaxa 0 output xs = parsePhylipBody' xs [] $ reverse output
 parsePhylipBody nTaxa remaining output (x:xs) = parsePhylipBody nTaxa (remaining-1) ((name,seq):output) xs where
                                                 (name,remainder) = L.break (==' ') x
                                                 seq = L.filter (/=' ') remainder
                                              
+--params are (remaining lines) (output stack 1) (output stack 2)
 parsePhylipBody' [] top [] = map (\(x,y) -> (L.unpack x,L.unpack y)) $ reverse top 
+parsePhylipBody' [] [] out = map (\(x,y) -> (L.unpack x,L.unpack y)) $ out
 parsePhylipBody' (x:xs) top [] = parsePhylipBody' (x:xs) [] $ reverse top
 parsePhylipBody' (x:xs) top ((name,seq):ys) = parsePhylipBody' xs ((name,seq `L.append` (L.filter (/=' ') x)):top) ys
 
@@ -123,7 +135,8 @@ instance Ord NumberedColumn where
 sortAlignment (ListAlignment names seqs cols) = ListAlignment names (transpose ans) ans where
                                                   numbers = transpose $ numberifyBasic $ ListAlignment names seqs cols
                                                   numbCols = map NumberedColumn $ map (\(a,b)-> zip a b) $ zip cols numbers
-                                                  reordered = bsort numbCols
+                                               --   reordered = bsort numbCols
+                                                  reordered = trace "not reordering" numbCols
                                                   ans = map (map fst) (map coldata reordered)
 
 gapPos :: Sequence -> [(Int,Int)]
@@ -160,8 +173,13 @@ gapPos' (x:xs) list Nothing pos = gapPos' xs list Nothing (pos+1)
 data ListAlignment = ListAlignment {names ::  [Name],
                             sequences :: [Sequence],
                             columns :: [Column]} deriving Show
+
 instance Eq ListAlignment where 
         (==) a b = (names a) == (names b) && (sequences a) == (sequences b) --assume cols are ok
+
+instance JSON ListAlignment where 
+        showJSON (ListAlignment names seqs cols) = showJSON ("Alignment",names,seqs)
+        readJSON (JSArray [(JSString tag),(JSArray seqs),(JSArray vals)]) = Error "unimplemented" -- quickListAlignment names seqs
 
 
 quickListAlignment :: [Name] -> [Sequence] -> ListAlignment

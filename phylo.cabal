@@ -20,4 +20,4 @@ Executable calclkl
 library
         Exposed-Modules: Phylo.Opt, Phylo.Alignment, Phylo.Tree, Phylo.Data, Phylo.Matrix, Phylo.Likelihood
         HS-Source-Dirs: src
-        Build-Depends: parallel>=3.1.0.1, hmatrix-gsl-stats>=0.1.2.9, statistics>=0.8.0.5, hmatrix >= 0.11.0.4, bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
+        Build-Depends: json>=0.4, parallel>=3.1.0.1, hmatrix-gsl-stats>=0.1.2.9, statistics>=0.8.0.5, hmatrix >= 0.11.0.4, bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
