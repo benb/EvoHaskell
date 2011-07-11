@@ -252,5 +252,5 @@ compatibleAlignments :: ListAlignment -> ListAlignment -> Bool
 compatibleAlignments x y = (names x == names y) && (or $ map compatSeq $ zip (sequences x) (sequences y)) where
                                compatSeq ((x:xs),ys) | isGapChar x = compatSeq (xs,ys)
                                compatSeq (xs,(y:ys)) | isGapChar y = compatSeq (xs,ys)
-                               compatSeq ((x:xs),(y:ys)) = x==y && compatSeq (xs,ys)
+                               compatSeq ((x:xs),(y:ys)) = (toUpper x)==(toUpper y) && compatSeq (xs,ys)
                                compatSeq ([],[]) = True
