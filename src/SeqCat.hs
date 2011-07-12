@@ -9,8 +9,8 @@ options = [ Option ['S'] ["sort"] (NoArg Sort) "Sort alignment" ]
 
 main = do args <- getArgs
           aln <- case getOpt RequireOrder options args of 
-                     ([],(file:xs),[]) -> parseAlignmentFile parseFasta file
-                     ((Sort:xs),(file:ys),[]) -> do myaln <- parseAlignmentFile parseFasta file
+                     ([],(file:xs),[]) -> parseAlignmentFile parseUniversal file
+                     ((Sort:xs),(file:ys),[]) -> do myaln <- parseAlignmentFile parseUniversal file
                                                     return $ liftM sortAlignment myaln
                      (_,_,msgs) -> error $ concat msgs
           case aln of 

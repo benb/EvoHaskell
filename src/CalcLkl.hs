@@ -17,7 +17,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment"
 
 main = do args <- getArgs
           (aln,tree,remainOpts) <- case getOpt Permute options args of 
-                         (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseFasta aln
+                         (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
                                                                                tree <- (liftM readBiNewickTree) (readFile tre)
                                                                                return (aln,tree,xs)
                          (_,_,msgs) -> error $ concat msgs
