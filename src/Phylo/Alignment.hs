@@ -50,12 +50,14 @@ parseUniversal (x:xs) = case x of
 
                                 
 
---"relaxed" phylip format
-
+--This parser has been briefly tested to work with the "relaxed" phylip format
+--It is intended to handle interleaved and sequential versions, but relies on spaces between 
+--The sequence name and the sequence data
+--It also won't work if sequence names are repeated
 parsePhylip :: Monad m =>  [L.ByteString] -> m [(String,String)]
 parsePhylip = parsePhylipHeader
 parsePhylipHeader :: Monad m => [L.ByteString] -> m [(String,String)]
-parsePhylipBody :: Int -> Int -> [(L.ByteString,L.ByteString)] -> [L.ByteString] -> [(String,String)]
+parsePhylipBody :: Bool -> Int -> Int -> [(L.ByteString,L.ByteString)] -> [L.ByteString] -> [(String,String)]
 parsePhylipBody' :: [L.ByteString] -> [(L.ByteString,L.ByteString)] -> [(L.ByteString,L.ByteString)] -> [(String,String)]
 
 
@@ -67,19 +69,49 @@ parsePhylipHeader (x:xs)  = (case (ans,nChar) of
                                 nTaxa = fmap fst t1
                                 t2 = fmap snd t1 >>= L.readInt . L.dropWhile  (==' ')
                                 nChar = fmap fst t2
-                                ans = fmap (\x -> parsePhylipBody x x [] xs) nTaxa
+                                filteredxs = filter (\x->L.empty /= (L.filter (/=' ') x)) xs
+                                ans = fmap (\x -> parsePhylipBody False x x [] filteredxs) nTaxa
 
 --parsePhylipBody nTaxa remaining output xs | trace ((show nTaxa) ++ " " ++ (show remaining) ++ " " ++ (show $  length xs) ++ (show (take 1 xs)) ++ (show output)) False  = undefined
-parsePhylipBody nTaxa 0 output xs = parsePhylipBody' xs [] $ reverse output
-parsePhylipBody nTaxa remaining output (x:xs) = parsePhylipBody nTaxa (remaining-1) ((name,seq):output) xs where
-                                                (name,remainder) = L.break (==' ') x
-                                                seq = L.filter (/=' ') remainder
+parsePhylipBody True nTaxa 0 output xs =  parsePhylipBody' [] [] $ reverse finoutput where
+                                                                finoutput = (name,seq):(tail output)
+                                                                (name,seq1) = head output
+                                                                seq=appendall seq1 xs
+                                                                appendall a [] = a
+                                                                appendall a (y:ys) = appendall (a `L.append` (L.filter (/=' ') y)) ys
+                                                                
+parsePhylipBody False nTaxa 0 output xs =  parsePhylipBody' xs [] $ reverse output
+--new sequence
+parsePhylipBody sequential nTaxa remaining output (x:xs) | (L.head x) /= ' ' && notseen x output && trace (show $ notseen x output) True = parsePhylipBody sequential nTaxa (remaining-1) ((name,seq):output) xs where
+                                                                                                                (name,remainder) = L.break (==' ') x
+                                                                                                                seq = L.filter (/=' ') remainder
+
+--seen before, append to previous seq
+parsePhylipBody sequential nTaxa remaining output (x:xs) | (L.head x) /= ' ' = trace "DROPPING" $ parsePhylipBody sequential nTaxa remaining output (droppedx:xs) where
+                                                                               (_,droppedx)=L.break(==' ') x
+
+--no name so seen before
+parsePhylipBody sequential nTaxa remaining output (x:xs)         = parsePhylipBody True nTaxa remaining ((name,seq):(tail output)) xs where
+                                                                                (name,seq1) = head output
+                                                                                seq=seq1 `L.append` (L.filter(/=' ') x)
+notseen:: L.ByteString -> [(L.ByteString,L.ByteString)] -> Bool
+notseen line previous = not $ any (name==) names where
+                                names = map fst previous
+                                (name,_) = L.break (==' ') line
                                              
 --params are (remaining lines) (output stack 1) (output stack 2)
+--we are finished:
 parsePhylipBody' [] top [] = map (\(x,y) -> (L.unpack x,L.unpack y)) $ reverse top 
 parsePhylipBody' [] [] out = map (\(x,y) -> (L.unpack x,L.unpack y)) $ out
+
+--loop next set of sequences
 parsePhylipBody' (x:xs) top [] = parsePhylipBody' (x:xs) [] $ reverse top
-parsePhylipBody' (x:xs) top ((name,seq):ys) = parsePhylipBody' xs ((name,seq `L.append` (L.filter (/=' ') x)):top) ys
+
+--append x to sequence seq and push onto top
+parsePhylipBody' (x:xs) top ((name,seq):ys) = parsePhylipBody' xs ((name,seq `L.append` (cleanup x)):top) ys where
+                                                                            -- remove (repeated) name if present 
+                                                                cleanup str | L.head str /=' ' = cleanup $ snd $ L.break (==' ') str
+                                                                            | otherwise = L.filter(/=' ') str
 
 dropGaps :: ListAlignment -> [(String,String)]
 dropGaps a = zip (names a) (map dropGap $ sequences a)
@@ -135,8 +167,7 @@ instance Ord NumberedColumn where
 sortAlignment (ListAlignment names seqs cols) = ListAlignment names (transpose ans) ans where
                                                   numbers = transpose $ numberifyBasic $ ListAlignment names seqs cols
                                                   numbCols = map NumberedColumn $ map (\(a,b)-> zip a b) $ zip cols numbers
-                                               --   reordered = bsort numbCols
-                                                  reordered = trace "not reordering" numbCols
+                                                  reordered = bsort numbCols
                                                   ans = map (map fst) (map coldata reordered)
 
 gapPos :: Sequence -> [(Int,Int)]
