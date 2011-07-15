@@ -123,3 +123,4 @@ optGammaF numCat aln tree pi s = quickGamma' numCat patcounts dataTree priors pi
                                                 eigenS = quickEigen pi s
                                                 patcounts = counts pAln
 
+data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,likelihoods::Matrix Double} | DINode DNode DNode Double | DTree DNode DNode 
