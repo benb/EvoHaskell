@@ -50,24 +50,6 @@ logLikelihoodMixture counts dataTree priors pis eigenS = sumLikelihoods counts l
                                                                 likelihoods = map summarise (transpose likelihoodss) 
                                                                 summarise lkl = sum $ zipWith (*) lkl priors
 
-gammaMix numCat alpha (u,lambda,u') = map (\s -> (u,scale s lambda,u')) scales where
-                           scales = gamma numCat alpha
-
-gamma :: Int -> Double -> [Double]
-gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl convergence errors (who wants >100 in the gamma dist anyway?)
-                   | otherwise       = map rK' [0..(numCat-1)] where
-                        alpha = shape
-                        beta = shape
-                        factor = alpha/beta*(fromIntegral numCat)
-
-                        freqK = map freqKf [0..(numCat-1)]
-                        freqKf i = incompleteGamma (alpha + 1.0) (beta * (gammaInvCDF (((fromIntegral i)+1.0)/(fromIntegral numCat))))
-
-                        rK' 0 = (head freqK) * factor
-                        rK' n | n < numCat = ((freqK!!n) - (freqK!!(n-1))) * factor
-                              | otherwise = factor * (1.0-(freqK!!(numCat-2)))
-                        gammaInvCDF p = (density_1p ChiSq UppInv (2.0*alpha) (1.0-p)) / (2.0*beta) -- (UppInv mysteriously has more stable convergence)
-
 
 data PatternAlignment = PatternAlignment {names :: [String], seqs::[String], columns::[String], patterns::[String], counts::[Int]}
 
@@ -122,5 +104,41 @@ optGammaF numCat aln tree pi s = quickGamma' numCat patcounts dataTree priors pi
                                                 priors = take numCat $ repeat (1.0/(fromIntegral numCat))
                                                 eigenS = quickEigen pi s
                                                 patcounts = counts pAln
+
+
+optGammaF2 :: Int -> ListAlignment -> Node -> Vector Double -> Matrix Double -> Double -> Double
+optGammaF2 numCat aln tree pi s alpha = logLikelihood patcounts dataTree fullPi eigenS where
+                                                dataTree = structData numCat AminoAcid pAln transpats tree
+                                                fullPi = Data.Packed.Vector.mapVector (/(fromIntegral numCat)) $ Data.Packed.Vector.join $replicate numCat pi
+                                                pAln = pAlignment aln
+                                                transpats = transpose $ patterns pAln
+                                                patcounts = counts pAln
+                                                qMat = normQ (makeQ s pi) pi
+                                                rateMats = map (\(i,mat) -> setRate i mat pi ) $ zip rates $ replicate numCat qMat
+                                                rates = gamma numCat alpha
+                                                fullMat = combineQ rateMats
+                                                eigenS = eigQ fullMat fullPi
+
+
+
+
+gammaMix numCat alpha (u,lambda,u') = map (\s -> (u,scale s lambda,u')) scales where
+                           scales = gamma numCat alpha
+
+gamma :: Int -> Double -> [Double]
+gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl convergence errors (who wants >100 in the gamma dist anyway?)
+                   | otherwise       = map rK' [0..(numCat-1)] where
+                        alpha = shape
+                        beta = shape
+                        factor = alpha/beta*(fromIntegral numCat)
+
+                        freqK = map freqKf [0..(numCat-1)]
+                        freqKf i = incompleteGamma (alpha + 1.0) (beta * (gammaInvCDF (((fromIntegral i)+1.0)/(fromIntegral numCat))))
+
+                        rK' 0 = (head freqK) * factor
+                        rK' n | n < numCat = ((freqK!!n) - (freqK!!(n-1))) * factor
+                              | otherwise = factor * (1.0-(freqK!!(numCat-2)))
+                        gammaInvCDF p = (density_1p ChiSq UppInv (2.0*alpha) (1.0-p)) / (2.0*beta) -- (UppInv mysteriously has more stable convergence)
+
 
 data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,likelihoods::Matrix Double} | DINode DNode DNode Double | DTree DNode DNode 

@@ -9,6 +9,17 @@ import Control.Monad
 import Debug.Trace 
 
 
+combineQ :: [Matrix Double] -> Matrix Double
+combineQ submats = fromBlocks allSubmats where
+                        nonSubmats = zip submats [0..] 
+                        zeroMat=buildMatrix rowCount colCount (\(i,j) -> 0)
+                        rowCount=rows $ head submats
+                        colCount=cols $ head submats
+                        tmpSubmats = map (\(mat,i) -> (replicate i zeroMat) ++ (mat: (replicate (len - i -1) zeroMat))) nonSubmats
+                        allSubmats = tmpSubmats
+                        len = length submats
+                   
+
 makeQ matS pi = runSTMatrix $ do 
                 let rawQ = matS <>(diag pi)
                 let rowTots = map (sumElements) $ toRows (rawQ)

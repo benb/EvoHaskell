@@ -25,7 +25,7 @@ main = do args <- getArgs
                 (Just a,Right t,[])-> putStrLn $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
                 (Just a,Right t,(Alpha val):[])-> putStrLn $ "WAG Gamma lkl:" ++ (show $ quickGamma 4 (read val) a t wagPi wagS)
                 (Just a,Right t,(OptAlpha):[])-> putStrLn $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
-                                                        f = optGammaF 4 a t wagPi wagS
+                                                        f = optGammaF2 4 a t wagPi wagS
                                                         alpha = goldenSection 0.001 0.02 99.0 (\x -> -(f x))
                                                         lkl = f alpha
                 (_,_,_) -> error "Can't parse something"
