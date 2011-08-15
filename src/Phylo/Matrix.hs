@@ -5,6 +5,7 @@ import Numeric.LinearAlgebra
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.Packed.ST
+import Control.Monad.ST
 import Control.Monad
 import Debug.Trace 
 
@@ -18,7 +19,6 @@ combineQ submats = fromBlocks allSubmats where
                         tmpSubmats = map (\(mat,i) -> (replicate i zeroMat) ++ (mat: (replicate (len - i -1) zeroMat))) nonSubmats
                         allSubmats = tmpSubmats
                         len = length submats
-                   
 
 makeQ matS pi = runSTMatrix $ do 
                 let rawQ = matS <>(diag pi)
@@ -66,4 +66,11 @@ symS oldS = runSTMatrix $ do
             mapM_ (sym) [0..(r-1)] 
             return s
 
+fixDiag mat = runSTMatrix $ do 
+                let discrepencies = map (foldVector (+) 0) $ toRows mat
+                s <- thawMatrix mat
+                forM_ (zip discrepencies [0..]) $ \(disc,row) -> do
+                        modifyMatrix s row row (\f->f-disc)
+                return s
+                        
 

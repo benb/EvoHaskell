@@ -12,11 +12,12 @@ import Numeric.GSL.Distribution.Continuous
 import Control.Exception as E
 import Control.Parallel
 import Control.Parallel.Strategies
+import Debug.Trace
 
 
-partialLikelihood' ::  (Double -> Matrix Double -> Matrix Double) -> DNode -> Matrix Double
-partialLikelihood' f (DLeaf name dist sequence partial) = f dist partial
-partialLikelihood' f (DINode c1 c2 dist) = par p1 $ f dist $ combinePartial p1 p2 where
+partialLikelihood' ::  (DNode -> Matrix Double -> Matrix Double) -> DNode -> Matrix Double
+partialLikelihood' f (DLeaf name dist sequence partial) = f (DLeaf name dist sequence partial) partial
+partialLikelihood' f (DINode c1 c2 dist) = par p1 $ f (DINode c1 c2 dist) $ combinePartial p1 p2 where
                                                 p1 = partialLikelihood' f c1
                                                 p2 = partialLikelihood' f c2
 partialLikelihood' f (DTree c1 c2) = par p1 $ combinePartial p1 p2 where
@@ -26,9 +27,20 @@ partialLikelihood' f (DTree c1 c2) = par p1 $ combinePartial p1 p2 where
 combinePartial :: Matrix Double -> Matrix Double -> Matrix Double
 combinePartial = mul 
 
-partialLikelihoodCalc :: EigenS -> Double -> Matrix Double -> Matrix Double
-partialLikelihoodCalc eig t mypL = myPt <> mypL where
+--this is for time-homogenous models
+partialLikelihoodCalc :: EigenS -> DNode -> Matrix Double -> Matrix Double
+partialLikelihoodCalc eig (DLeaf _ t _ _) = partialLikelihoodCalc' eig t
+partialLikelihoodCalc eig (DINode _ _ t) = partialLikelihoodCalc' eig t
+partialLikelihoodCalc eig (DTree _ _) = partialLikelihoodCalc' eig 0.0
+partialLikelihoodCalc' eig t mypL = myPt <> mypL where
                                         myPt = pT eig t
+
+partialLikelihoodCalcHet :: (DNode -> EigenS) -> DNode -> Matrix Double -> Matrix Double
+partialLikelihoodCalcHet map node = case node of 
+                                        (DLeaf _ t _ _) -> partialLikelihoodCalc' (map node) t
+                                        (DINode _ _ t)  -> partialLikelihoodCalc' (map node) t
+                                        (DTree _ _)     -> partialLikelihoodCalc' (map node) 0.0
+                                        
  
 partialLikelihood :: EigenS ->  DNode -> Matrix Double
 partialLikelihood eigenS = partialLikelihood' $ partialLikelihoodCalc eigenS
@@ -106,10 +118,11 @@ optGammaF numCat aln tree pi s = quickGamma' numCat patcounts dataTree priors pi
                                                 patcounts = counts pAln
 
 
+flatFullPi numCat pi = Data.Packed.Vector.mapVector (/(fromIntegral numCat)) $ Data.Packed.Vector.join $replicate numCat pi
 optGammaF2 :: Int -> ListAlignment -> Node -> Vector Double -> Matrix Double -> Double -> Double
 optGammaF2 numCat aln tree pi s alpha = logLikelihood patcounts dataTree fullPi eigenS where
                                                 dataTree = structData numCat AminoAcid pAln transpats tree
-                                                fullPi = Data.Packed.Vector.mapVector (/(fromIntegral numCat)) $ Data.Packed.Vector.join $replicate numCat pi
+                                                fullPi = flatFullPi numCat pi
                                                 pAln = pAlignment aln
                                                 transpats = transpose $ patterns pAln
                                                 patcounts = counts pAln
@@ -119,8 +132,21 @@ optGammaF2 numCat aln tree pi s alpha = logLikelihood patcounts dataTree fullPi 
                                                 fullMat = combineQ rateMats
                                                 eigenS = eigQ fullMat fullPi
 
+optThmm :: Int -> ListAlignment -> Node -> Vector Double -> Matrix Double -> ([Double] -> Double)
+optThmm numCat aln tree pi s = partialOptThmm numCat patcounts dataTree pi s where
+                                        dataTree = structData numCat AminoAcid pAln transpats tree                                                    
+                                        transpats = transpose $ patterns pAln
+                                        patcounts = counts pAln
+                                        pAln = pAlignment aln
 
 
+partialOptThmm numCat patcounts dataTree pi s [logalpha,logsigma] = ans2 where
+                                                                                eigenS  = eigQ qMat fullPi                                     
+                                                                                ans = logLikelihood patcounts dataTree (flatFullPi numCat pi) eigenS
+                                                                                ans2 | trace ((show (exp logalpha)) ++ " " ++ (show (exp logsigma)) ++ " " ++ (show ans)) True = ans
+                                                                                qMat = thmm numCat pi s priors (exp logalpha) (exp logsigma)
+                                                                                priors = replicate numCat (1.0 / (fromIntegral numCat))
+                                                                                fullPi = flatFullPi numCat pi
 
 gammaMix numCat alpha (u,lambda,u') = map (\s -> (u,scale s lambda,u')) scales where
                            scales = gamma numCat alpha
@@ -142,3 +168,11 @@ gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl co
 
 
 data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,likelihoods::Matrix Double} | DINode DNode DNode Double | DTree DNode DNode 
+
+thmm numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where
+                                        qMats = map (\(i,mat) -> setRate i mat pi) $ zip (gamma numCat alpha) $ replicate numCat $ makeQ s pi
+                                        subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats
+                                        getRow i mat = map (kk' mat i) [0..(numCat-1)] 
+                                        size = cols s
+                                        kk' mat i j | i==j = mat
+                                                    | otherwise = diagRect 0.0 (mapVector ((priors !! j) * sigma * ) pi) size size
