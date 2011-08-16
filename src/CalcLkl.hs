@@ -30,11 +30,12 @@ main = do args <- getArgs
                                                         f = optGammaF2 4 a t wagPi wagS
                                                         alpha = goldenSection 0.001 0.02 99.0 (\x -> -(f x))
                                                         lkl = f alpha
-                (Just a,Right t,(OptThmm):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show lkl) where
-                                                        f l = -(optThmm 4 a t wagPi wagS l)
-                                                        ([logalpha,logsigma],p) = minimize NMSimplex2 1E-2 30 [1,1] f [5,7]
+                (Just a,Right t,(OptThmm):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorzero) ++ " " ++ (show lkl) where
+                                                        modelTree = opt2Thmm 5 a t wagPi wagS  
+                                                        (model,_) = modelTree
+                                                        (optTree,[logalpha,logsigma,priorzero],_) = optParamsAndBL modelTree [0.0,0.0,0.2] [Nothing,Nothing,Just 0.01] [Nothing,Nothing,Just 0.99] 0.01
                                                         (alpha,sigma) = (exp logalpha,exp logsigma)
-                                                        lkl = -(f [logalpha,logsigma])
+                                                        lkl = -(model optTree [logalpha,logsigma,priorzero])
                 (_,_,_) -> error "Can't parse something"
 
  

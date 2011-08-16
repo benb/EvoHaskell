@@ -2,13 +2,15 @@ module Phylo.Likelihood where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
-import Numeric.LinearAlgebra ((<>),(<.>),scale,mul)
+import Phylo.Opt
+import Numeric.LinearAlgebra ((<>),(<.>),scale,mul,constant,diag)
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.List
 import Data.Maybe
 import Statistics.Math
 import Numeric.GSL.Distribution.Continuous
+import Numeric.GSL.Minimization
 import Control.Exception as E
 import Control.Parallel
 import Control.Parallel.Strategies
@@ -133,20 +135,29 @@ optGammaF2 numCat aln tree pi s alpha = logLikelihood patcounts dataTree fullPi 
                                                 eigenS = eigQ fullMat fullPi
 
 optThmm :: Int -> ListAlignment -> Node -> Vector Double -> Matrix Double -> ([Double] -> Double)
-optThmm numCat aln tree pi s = partialOptThmm numCat patcounts dataTree pi s where
+optThmm numCat aln tree pi s = boundedFunction (-1E20) [Nothing,Nothing,Just 0.0] [Nothing,Nothing,Just 1.0] $ partialOptThmm numCat patcounts pi s dataTree where
                                         dataTree = structData numCat AminoAcid pAln transpats tree                                                    
                                         transpats = transpose $ patterns pAln
                                         patcounts = counts pAln
                                         pAln = pAlignment aln
 
+opt2Thmm numCat aln tree pi s = (modelF,dataTree) where
+                                dataTree = structData numCat AminoAcid pAln transpats tree                                                                                                                                            
+                                transpats = transpose $ patterns pAln  
+                                patcounts = counts pAln    
+                                pAln = pAlignment aln 
+                                modelF = partialOptThmm numCat patcounts pi s
+                                
 
-partialOptThmm numCat patcounts dataTree pi s [logalpha,logsigma] = ans2 where
+partialOptThmm numCat patcounts pi s dataTree [logalpha,logsigma,priorZero] | trace "OK" True = ans2 where
                                                                                 eigenS  = eigQ qMat fullPi                                     
                                                                                 ans = logLikelihood patcounts dataTree (flatFullPi numCat pi) eigenS
-                                                                                ans2 | trace ((show (exp logalpha)) ++ " " ++ (show (exp logsigma)) ++ " " ++ (show ans)) True = ans
+                                                                                ans2 = ans -- | trace ((show (exp logalpha)) ++ " " ++ (show (exp logsigma)) ++ " " ++ (show priorZero) ++ " " ++ (show ans)) True = ans
                                                                                 qMat = thmm numCat pi s priors (exp logalpha) (exp logsigma)
-                                                                                priors = replicate numCat (1.0 / (fromIntegral numCat))
-                                                                                fullPi = flatFullPi numCat pi
+                                                                                remainder=1.0-priorZero
+                                                                                priors = priorZero : (replicate numCat (remainder/ (fromIntegral numCat)))
+                                                                                fullPi = Data.Packed.Vector.join [mapVector (*priorZero) pi, mapVector (*remainder) $ flatFullPi (numCat-1) pi]
+
 
 gammaMix numCat alpha (u,lambda,u') = map (\s -> (u,scale s lambda,u')) scales where
                            scales = gamma numCat alpha
@@ -169,10 +180,57 @@ gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl co
 
 data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,likelihoods::Matrix Double} | DINode DNode DNode Double | DTree DNode DNode 
 
+getBL node = getBL' node []
+
+getBL' (DLeaf _ bl _ _) bls = bl:bls
+getBL' (DINode l r bl) bls = bl:(getBL' l (getBL' r bls))
+getBL' (DTree l r) bls = (getBL' l (getBL' r bls))
+
+setBL bls node = fst $ setBL' bls node
+setBL' bls (DTree l r) = ((DTree left right), remainder2) where
+                        (left,remainder) = setBL' bls l
+                        (right,remainder2) = setBL' remainder r
+
+setBL' (bl2:bls) (DINode l r bl) = ((DINode left right bl2), remainder2) where
+                             (left,remainder) = setBL' bls l
+                             (right,remainder2) = setBL' remainder r
+
+setBL' (bl:bls) (DLeaf a _ b c) = ((DLeaf a bl b c),bls)
+
+optBL:: DNode -> (DNode -> [Double] -> Double) -> [Double] -> [Double] -> Double
+optBL dataTree model params bls = model (setBL bls dataTree) params
+
+zeroQMat size = diag $ constant 0.0 size
+
 thmm numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where
-                                        qMats = map (\(i,mat) -> setRate i mat pi) $ zip (gamma numCat alpha) $ replicate numCat $ makeQ s pi
+                                        qMats = (zeroQMat (rows s)) : (map (\(i,mat) -> setRate i mat pi) $ zip (gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi)
                                         subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats
                                         getRow i mat = map (kk' mat i) [0..(numCat-1)] 
                                         size = cols s
                                         kk' mat i j | i==j = mat
                                                     | otherwise = diagRect 0.0 (mapVector ((priors !! j) * sigma * ) pi) size size
+
+
+optParamsAndBL (model,dataTree) params lower upper cutoff = optParamsAndBL' model dataTree params lower upper cutoff (model dataTree params) []  where                                                                                                                     
+
+loggedFunc :: ([Double] -> Double) -> ([Double] -> Double)
+loggedFunc f = f2 where
+               f2 x = ans2 where
+                      ans2 | trace ((show x) ++ " -> " ++ (show ans)) True = ans
+                      ans = f x
+                          
+                                                                                                                                                                                                                                              
+maximize method pre maxiter params f size = minimize method pre maxiter params f2 size where
+                                               f2 x = -(f x)
+
+optParamsAndBL' :: (DNode -> [Double] -> Double) -> DNode -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])
+optParamsAndBL' model dataTree params lower upper cutoff lastIter path = optimal where                                                                                                                                                                         
+                                                         optBLFunc = loggedFunc $  boundedFunction (-1E20) (repeat $ Just 0.0) (repeat $ Nothing) $ optBL dataTree model optParams                                                                                                                                              
+                                                         (optBLs,_) = maximize NMSimplex2 1E-2 1000 (map (\i->0.1) (getBL dataTree)) optBLFunc (getBL dataTree)                                                                                                 
+                                                         optDataTree = setBL optBLs dataTree                                                                                                                                               
+                                                         model2 = loggedFunc $ boundedFunction (-1E20) lower upper (model dataTree)
+                                                         (optParams,_) = maximize NMSimplex2 1E-2 1000 (map (\i->0.1) params) model2 params                                                                        
+                                                         thisIter = model optDataTree optParams                                                                                                                                               
+                                                         optimal | trace ("Update " ++ (show lastIter) ++ " -> " ++ (show thisIter)) True = if (thisIter-lastIter > cutoff)                                                                                                                                            
+                                                                   then optParamsAndBL' model optDataTree optParams lower upper cutoff thisIter path
+                                                                   else (optDataTree,optParams,path)   

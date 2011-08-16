@@ -1,5 +1,8 @@
-module Phylo.Opt (goldenSection) where
+module Phylo.Opt (goldenSection,boundedFunction) where
 import Debug.Trace
+import Data.Maybe
+import Data.List
+import Numeric.GSL.Minimization
 
 phi = (1+sqrt(5))/2
 resphi = 2 - phi
@@ -18,4 +21,14 @@ goldenSection'' tol x1 x2 x3 x4 f1 f2 f3 f4 f | (abs (x3 - x1) < tol * (abs(x2)+
                                               | otherwise = goldenSection' tol x4 x2 x1 f4 f2 f1 f
 
                                             
+
+boundedFunction :: Double -> [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> Double
+boundedFunction bad lower upper f vals = if ok
+                                         then ans
+                                         else bad where
+                                         lowerok = Nothing == (find (==True) $ map (\(bound,i) -> (fromJust bound) > i)$ filter boundset $ zip lower vals)
+                                         upperok = Nothing == (find (==True) $ map (\(bound,i) -> (fromJust bound) < i)$ filter boundset $ zip upper vals)
+                                         boundset (bound,i) = isJust bound
+                                         ok = lowerok && upperok
+                                         ans = f vals
 
