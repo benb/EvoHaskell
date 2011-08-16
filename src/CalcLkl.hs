@@ -8,6 +8,7 @@ import Phylo.Data
 import Phylo.Likelihood
 import Phylo.Opt
 import Numeric.GSL.Minimization
+import Data.Packed.Vector
 
 
 data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm
@@ -31,7 +32,8 @@ main = do args <- getArgs
                                                         alpha = goldenSection 0.001 0.02 99.0 (\x -> -(f x))
                                                         lkl = f alpha
                 (Just a,Right t,(OptThmm):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorzero) ++ " " ++ (show lkl) where
-                                                        modelTree = opt2Thmm 5 a t wagPi wagS  
+                                                        piF = fromList $ scaledAAFrequencies a
+                                                        modelTree = opt2Thmm 5 a t piF wagS  
                                                         (model,_) = modelTree
                                                         (optTree,[logalpha,logsigma,priorzero],_) = optParamsAndBL modelTree [0.0,0.0,0.2] [Nothing,Nothing,Just 0.01] [Nothing,Nothing,Just 0.99] 0.01
                                                         (alpha,sigma) = (exp logalpha,exp logsigma)
