@@ -200,6 +200,11 @@ setBL' (bl:bls) (DLeaf a _ b c) = ((DLeaf a bl b c),bls)
 optBL:: DNode -> (DNode -> [Double] -> Double) -> [Double] -> [Double] -> Double
 optBL dataTree model params bls = model (setBL bls dataTree) params
 
+optBLBoth:: DNode -> (DNode -> [Double] -> Double) -> [Double] -> Double
+optBLBoth dataTree model params = model newTree params' where
+                                  (newTree,params') = setBL' params dataTree
+
+
 zeroQMat size = diag $ constant 0.0 size
 
 thmm numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where
@@ -226,11 +231,17 @@ maximize method pre maxiter params f size = minimize method pre maxiter params f
 optParamsAndBL' :: (DNode -> [Double] -> Double) -> DNode -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])
 optParamsAndBL' model dataTree params lower upper cutoff lastIter path = optimal where                                                                                                                                                                         
                                                          optBLFunc = loggedFunc $  boundedFunction (-1E20) (repeat $ Just 0.0) (repeat $ Nothing) $ optBL dataTree model optParams                                                                                                                                              
-                                                         (optBLs,_) = maximize NMSimplex2 1E-2 1000 (map (\i->0.1) (getBL dataTree)) optBLFunc (getBL dataTree)                                                                                                 
+                                                         (optBLs,_) = maximize NMSimplex2 1E-3 10000 (map (\i->0.1) (getBL dataTree)) optBLFunc (getBL dataTree)                                                                                                 
                                                          optDataTree = setBL optBLs dataTree                                                                                                                                               
                                                          model2 = loggedFunc $ boundedFunction (-1E20) lower upper (model dataTree)
-                                                         (optParams,_) = maximize NMSimplex2 1E-2 1000 (map (\i->0.1) params) model2 params                                                                        
-                                                         thisIter = model optDataTree optParams                                                                                                                                               
+                                                         (optParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) model2 params                                                                        
+                                                         numBL = length $ getBL dataTree
+                                                         optParams2 = optBLs ++ optParams 
+                                                         model3 = loggedFunc $ boundedFunction (-1E20) ((replicate numBL $ Just 0.0) ++ lower) ((replicate numBL $ Nothing) ++ upper) $ optBLBoth dataTree model 
+                                                         (optParams3,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) optParams2) model3 optParams2
+                                                         bestBL = optParams3
+                                                         (bestTree,bestParams)=setBL' bestBL dataTree
+                                                         thisIter = model bestTree bestParams                                                                                                                                              
                                                          optimal | trace ("Update " ++ (show lastIter) ++ " -> " ++ (show thisIter)) True = if (thisIter-lastIter > cutoff)                                                                                                                                            
-                                                                   then optParamsAndBL' model optDataTree optParams lower upper cutoff thisIter path
-                                                                   else (optDataTree,optParams,path)   
+                                                                   then optParamsAndBL' model bestTree bestParams lower upper cutoff thisIter path
+                                                                   else (bestTree,bestParams,path)   
