@@ -41,7 +41,7 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
                                         
 
 logLikelihoodModel :: DNode -> Double
-logLikelihoodModel (DTree left right pLs pC priors pis) = sumLikelihoods pC likelihoods where
+logLikelihoodModel (DTree left middle right pLs pC priors pis) = sumLikelihoods pC likelihoods where
                                                                 likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
                                                                 likelihoods = map summarise (transpose likelihoodss) 
                                                                 summarise lkl = sum $ zipWith (*) lkl priors
@@ -57,7 +57,7 @@ calcPL :: DNode -> DNode -> [Double] -> [BranchModel] -> [Matrix Double]
 calcPL left right dist model = allPLC (map (\x-> x dist) model) $ allCombine (getPL left) (getPL right) 
 calcLeafPL :: Matrix Double -> [Double] -> [BranchModel] -> [Matrix Double]
 calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (map (\x -> x dist) model)
-calcRootPL left right = allCombine (getPL left) (getPL right)
+calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL left) (getPL right)
 
 
 restructData (DLeaf name dist sequence partial _ _) model priors pi  = DLeaf name dist sequence partial model partial' where
@@ -66,10 +66,11 @@ restructData (DINode left right dist _ _ ) model priors pi= DINode newleft newri
                                                             partial = calcPL newleft newright [dist] model
                                                             newleft = restructData left model priors pi
                                                             newright = restructData right model priors pi
-restructData (DTree left right _ pc _ _ ) model priors pi = DTree newleft newright partial pc priors pi where 
-                                            partial = calcRootPL newleft newright
+restructData (DTree left middle right _ pc _ _ ) model priors pi = DTree newleft newmiddle newright partial pc priors pi where 
+                                            partial = calcRootPL newleft newmiddle newright
                                             newleft = restructData left model priors pi
                                             newright = restructData right model priors pi
+                                            newmiddle = restructData middle model priors pi  
 
 structDataN :: Int -> SeqDataType -> PatternAlignment -> Node -> NNode
 
@@ -84,9 +85,17 @@ structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode l
                                                                               left = structDataN' hiddenClasses seqDataType pA transPat c1
                                                                               right = structDataN' hiddenClasses seqDataType pA transPat c2
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree c1 c2 ) = NTree left right $ counts pA where
-                                                                              left = structDataN' hiddenClasses seqDataType pA transPat c1
-                                                                              right = structDataN' hiddenClasses seqDataType pA transPat c2
+structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = NTree left middle right $ counts pA where
+                                                                                  left = structDataN' hiddenClasses seqDataType pA transPat l
+                                                                                  right = structDataN' hiddenClasses seqDataType pA transPat r
+                                                                                  middle = structDataN' hiddenClasses seqDataType pA transPat $ addDist dist c2
+                                                                                  addDist d (Leaf name dist) = Leaf name (dist+d)
+                                                                                  addDist d (INode l r dist) = INode l r (dist+d)
+
+structDataN' hiddenClasses seqDataType pA transPat (Tree c2 (INode l r dist)) = structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2)
+
+structDataN' hiddenClasses seqDataType pA transPat (Tree (Leaf name dist) (Leaf name2 dist2))  = error "Can't handle tree with only 2 leaves"
+
 
 structData hiddenClasses seqDataType pAln model transPat node = addModel (structDataN hiddenClasses seqDataType pAln node) model 
 
@@ -100,10 +109,11 @@ addModelNNode (NINode c1 c2 dist) model priors pi =  DINode left right dist mode
                                                   right = addModelNNode c2 model priors pi
                                                   myPL = calcPL left right [dist] model 
                                                                             
-addModelNNode (NTree c1 c2 pat) model priors pi = DTree left right myPL pat priors pi where
+addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myPL pat priors pi where
                                   left = addModelNNode c1 model priors pi
-                                  right= addModelNNode c2 model priors pi
-                                  myPL = calcRootPL left right
+                                  middle = addModelNNode c2 model priors pi
+                                  right= addModelNNode c3 model priors pi
+                                  myPL = calcRootPL left middle right
 
 data SeqDataType = AminoAcid | Nucleotide
 getPartial :: Int -> SeqDataType -> String -> Matrix Double
@@ -170,9 +180,9 @@ type BranchModel = [Double] -> Matrix Double
 type OptModel = DNode -> [Double] -> Double
 data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,tipLikelihoods::Matrix Double,p::([[Double] -> Matrix Double]),partialLikelihoods::[Matrix Double]} |
         DINode DNode DNode Double ([[Double] -> Matrix Double]) [Matrix Double] | 
-        DTree DNode DNode [Matrix Double] [Int] [Double] [(Vector Double)]
+        DTree DNode DNode DNode [Matrix Double] [Int] [Double] [(Vector Double)]
 
-data NNode = NLeaf String Double String (Matrix Double) | NINode NNode NNode Double | NTree NNode NNode [Int]
+data NNode = NLeaf String Double String (Matrix Double) | NINode NNode NNode Double | NTree NNode NNode NNode [Int]
 data DataModel = DataModel {dTree::DNode, patterncounts::[Int], priors::[Double], pis::[Vector Double]}
 
 class AddTree a where
@@ -190,19 +200,20 @@ instance AddTree DNode where
 
 getPL (DLeaf _ _ _ _ _ lkl) = lkl
 getPL (DINode _ _ _ _ lkl) = lkl
-getPL (DTree _ _ lkl _ _ _) = lkl
+getPL (DTree _ _ _ lkl _ _ _) = lkl
 
 getBL node = getBL' node []
 
 getBL' (DLeaf _ bl _ _ _ _) bls = bl:bls
 getBL' (DINode l r bl _ _) bls = bl:(getBL' l (getBL' r bls))
-getBL' (DTree l r _ _ _ _ ) bls = (getBL' l (getBL' r bls))
+getBL' (DTree l m r _ _ _ _ ) bls = (getBL' l (getBL' m (getBL' r bls)))
 
 setBL bls node = fst $ setBL' bls node
-setBL' bls (DTree l r pl pC priors pi) = ((DTree left right partial pC priors pi), remainder2) where
+setBL' bls (DTree l m r pl pC priors pi) = ((DTree left middle right partial pC priors pi), remainder3) where
                         (left,remainder) = setBL' bls l
-                        (right,remainder2) = setBL' remainder r
-                        partial = calcRootPL left right
+                        (middle,remainder2) = setBL' remainder m
+                        (right,remainder3) = setBL' remainder2 r
+                        partial = calcRootPL left middle right
 
 setBL' (bl2:bls) (DINode l r bl mats pl) = ((DINode left right bl2 mats partial), remainder2) where
                              (left,remainder) = setBL' bls l
