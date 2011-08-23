@@ -74,7 +74,7 @@ restructData (DTree left middle right _ pc _ _ ) model priors pi = DTree newleft
 
 structDataN :: Int -> SeqDataType -> PatternAlignment -> Node -> NNode
 
-structDataN hiddenClasses seqDataType pAln node | trace "OKX" True = structDataN' hiddenClasses seqDataType pAln (transpose $ patterns pAln) node 
+structDataN hiddenClasses seqDataType pAln node = structDataN' hiddenClasses seqDataType pAln (transpose $ patterns pAln) node 
 structDataN' hiddenClasses seqDataType (PatternAlignment names seqs columns patterns counts) transPat (Leaf name dist) = ans where
                                                                                                                           partial = getPartial hiddenClasses seqDataType sequence 
                                                                                                                           sequence = snd $ fromJust $ find (\(n,_) -> n==name) $ zip names transPat 
@@ -185,10 +185,16 @@ data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,tipLike
 data NNode = NLeaf String Double String (Matrix Double) | NINode NNode NNode Double | NTree NNode NNode NNode [Int]
 data DataModel = DataModel {dTree::DNode, patterncounts::[Int], priors::[Double], pis::[Vector Double]}
 
+instance Show DNode where
+        show (DTree l m r _ _ _ _) = "("++(show l)++","++(show m)++","++(show r)++");"
+        show (DINode l r d _ _) = "(" ++ (show l)++","++(show r)++"):"++(show d)
+        show (DLeaf name d _ _ _ _) = name++":"++(show d)
+
+
 class AddTree a where
         addModel :: (AddTree a) => a -> [BranchModel] -> [Double] -> [Vector Double] -> DNode
         addModelFx :: (AddTree a) => a -> ([BranchModel],[Vector Double]) -> [Double] -> DNode
-        addModelFx t (bm,pi) prior | trace "-1" True = addModel t bm prior pi
+        addModelFx t (bm,pi) prior = addModel t bm prior pi
 instance AddTree NNode where
         addModel w x y z = ans2 where
                        ans = addModelNNode w x y z
@@ -201,6 +207,53 @@ instance AddTree DNode where
 getPL (DLeaf _ _ _ _ _ lkl) = lkl
 getPL (DINode _ _ _ _ lkl) = lkl
 getPL (DTree _ _ _ lkl _ _ _) = lkl
+
+goLeft (DTree (DINode l r dist model pL) middle right _ pC priors pi)  = DTree l r r' rootpL pC priors pi where
+        rootpL = calcRootPL l r r'
+        r' = DINode middle right dist model pL' 
+        pL' = calcPL middle right [dist] model
+
+goRight (DTree left middle (DINode l r dist model pL) _ pC priors pi) = DTree l' l r rootpL pC priors pi where
+        rootpL = calcRootPL l' l r
+        l' = DINode left middle dist model pL'
+        pL' = calcPL left middle [dist] model
+
+canGoLeft (DTree (DINode _ _ _ _ _) _ _ _ _ _ _ ) = True
+canGoLeft _ = False
+
+optBLD tree = t3 where
+        t1 = swapLeftMiddle $ optLeftBL $ if (canGoLeft tree) then optBL' (goLeft tree) else tree
+        t2 = swapLeftRight $ optLeftBL $ swapLeftMiddle $ if (canGoLeft t1) then goRight $ optBL' (goLeft t1) else t1
+        t3 = swapLeftRight $ optLeftBL $ if (canGoLeft t2) then goRight $ optBL' (goLeft t2) else t2
+
+optBL' tree = ans where
+        leftOptd = if (canGoLeft tree) then goRight $ optBL' (goLeft tree) else tree
+        ansL = swapLeftMiddle $ optLeftBL leftOptd
+        midOptd = if (canGoLeft ansL) then goRight $ optBL' (goLeft ansL) else ansL
+        ans = swapLeftMiddle $ optLeftBL midOptd
+
+
+descencents (DTree l m r _ _ _ _) = (descencents l) ++ (descencents m ) ++ (descencents r)
+descencents (DLeaf name _ _ _ _ _) = name ++ ","
+descencents (DINode l r _ _ _) = (descencents l) ++ (descencents r)
+
+--setLeftBL (DTree l m r _ _ _ _ ) x | trace ((show x ) ++ " (" ++ (descencents l) ++ " : " ++ (descencents m) ++ " : " ++ (descencents r) ++ ")") False = undefined
+
+setLeftBL (DTree (DLeaf name dist seq tip model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
+        partial' = calcLeafPL tip [x] model
+        newleft = DLeaf name x seq tip model partial'
+        pl' = calcRootPL newleft m r 
+
+
+setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
+        partial' = calcPL l1 r1 [x] model
+        newleft = DINode l1 r1 x model partial'
+        pl' = calcRootPL newleft m r 
+
+optLeftBL tree  = setLeftBL tree (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree x)))
+swapLeftMiddle (DTree l m r pL pC priors pi) = DTree m l r pL pC priors pi
+swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
+
 
 getBL node = getBL' node []
 
@@ -236,16 +289,16 @@ basicModel s pi _ = ([model],[pi]) where
 quickLkl aln tree pi s = qdLkl 1 [1.0] AminoAcid aln tree (basicModel s pi) []
 quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid aln tree (gammaModel numCat s pi) [alpha]
 
-gammaModel numCat s pi [alpha] = (models,repeat pi) where
-                                models = map (\r -> scaledpT r eigenS) $ gamma numCat alpha
-                                eigenS = quickEigen pi s
+gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
+                                models  = map (\r -> scaledpT r eigenS) $ gamma numCat alpha
+                                eigenS  = quickEigen pi s
 
-thmmModel numCat pi s [priorZero,logalpha,logsigma] | traceShow [priorZero,logalpha,logsigma] True = ([thmm numCat pi s priors (exp logalpha) (exp logsigma)],[fullPi]) where
-                        priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral numCat)) )
+thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
+                        priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) )
                         fullPi = makeFullPi priors pi
  
 
-quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat pi s) [priorZero,alpha,sigma] 
+quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
 thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> BranchModel
 thmm numCat pi s priors alpha sigma = standardpT $ eigQ (fixDiag $ fromBlocks subMats) fullPi where
@@ -259,25 +312,27 @@ thmm numCat pi s priors alpha sigma = standardpT $ eigQ (fixDiag $ fromBlocks su
 
 
 
-loggedFunc :: ([Double] -> Double) -> ([Double] -> Double)
+loggedFunc :: (Show a) => (a -> Double) -> (a -> Double)
 loggedFunc f = f2 where
                f2 x = ans3 where
                       ans3 | trace (show x) True = ans2
                       ans2 | trace ((show x) ++ " -> " ++ (show ans)) True = ans
                       ans = f x
                     
-maximize method pre maxiter size f params = minimize method pre maxiter size f2 params where
-                                               f2 = (*(-1)) . f
+maximize method pre maxiter size f params = minimize method pre maxiter size (invert f) params where
+
+invert f = (*(-1)). f
 
 optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     
 
 optBL :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> Double -> DNode
-optBL model t' params priors cutoff = optTree where
-        tree = addModelFx t' (model params) priors
-        optBLFunc = loggedFunc . boundedFunction (-1E20) (repeat $ Just 0.0) (repeat $ Nothing) . rawOptBLFunc   
-        rawOptBLFunc t params = logLikelihood $ setBL params t
-        (optBLs,_) = maximize NMSimplex2 1E-3 10000 (map (\i->0.1) (getBL tree)) (optBLFunc tree) (getBL tree)
-        optTree = setBL optBLs tree
+optBL model t' params priors cutoff = traceShow optTree optTree where
+        tree  = addModelFx t' (model params) priors
+        optTree = optBLD $ optBLD tree
+        {-optBLFunc = loggedFunc . boundedFunction (-1E20) (repeat $ Just 0.0) (repeat $ Nothing) . rawOptBLFunc   -}
+        {-rawOptBLFunc t params = logLikelihood $ setBL params t-}
+        {-(optBLs,_) = maximize NMSimplex2 1E-3 10000 (map (\i->0.1) (getBL tree)) (optBLFunc tree) (getBL tree)-}
+        {-optTree = setBL optBLs tree-}
  
 optParams :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> [Double]
 optParams model t' params priors lower upper cutoff = bestParams where
@@ -290,18 +345,21 @@ optParams model t' params priors lower upper cutoff = bestParams where
 
 optParamsAndBL' :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])  
 optParamsAndBL' model tree params priors lower upper cutoff lastIter path | trace ("OK2" ++ (show lastIter)) $ True = optimal where                                                                                                                                                        
-                                              bestParams = optParams model tree params priors lower upper cutoff
-                                              bestTree = optBL model tree bestParams priors cutoff
-                                              optimal = (addModelFx bestTree (model bestParams) priors,bestParams,path)
+                                              tree' = optBL model tree params priors cutoff
+                                              bestParams = optParams model tree' params priors lower upper cutoff
+                                              bestTree = optBL model tree' bestParams priors cutoff
+                                              thisIter = logLikelihood bestTree
+                                              optimal = doNext (thisIter - lastIter)
+                                              doNext improvement | improvement < cutoff = (bestTree,bestParams,path)
+                                              doNext improvement | improvement < 0.1 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
+                                              doNext improvement =  optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path                                                                                            
 
-
-                                               {-numBL = length $ getBL dataTree                                                                                                                                                      -}
-                                               {-optParams2 = optBLs ++ optParams                                                                                                                                                     -}
-                                               {-model3 = loggedFunc $ boundedFunction (-1E20) ((replicate numBL $ Just 0.0) ++ lower) ((replicate numBL $ Nothing) ++ upper) $ optBLBoth dataTree model                              -}
-                                               {-(optParams3,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) optParams2) model3 optParams2                                                                                        -}
-                                               {-bestBL = optParams3                                                                                                                                                                  -}
-                                               {-(bestTree,bestParams)=setBL' bestBL dataTree                                                                                                                                         -}
-                                               {-thisIter = model bestTree bestParams                                                                                                                                                 -}
-                                               {-optimal | trace ("Update " ++ (show lastIter) ++ " -> " ++ (show thisIter)) True = if (thisIter-lastIter > cutoff)                                                                   -}
-                                                         {-then optParamsAndBL' model bestTree bestParams lower upper cutoff thisIter path                                                                                            -}
-                                                         {-else (bestTree,bestParams,path)      -}                 
+optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path where
+                                                                        numParams = length params
+                                                                        optFunc = loggedFunc $ boundedFunction (-1E20) (lower ++ (repeat $ Just 0.0)) (upper ++ (repeat Nothing)) rawFunc
+                                                                        rawFunc testparams = logLikelihood $ addModelFx (setBL (drop numParams testparams) tree) (model $ take numParams testparams) priors
+                                                                        startParams = params ++ (getBL tree)
+                                                                        (optParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.01) startParams) optFunc startParams
+                                                                        (bestParams,bestBL) = splitAt numParams optParams
+                                                                        bestTree = addModelFx (setBL bestBL tree) (model bestParams) priors
+                                                                        thisIter = logLikelihood bestTree
