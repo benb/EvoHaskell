@@ -404,7 +404,7 @@ optParamsAndBL' model tree params priors lower upper cutoff lastIter path | trac
                                               thisIter = logLikelihood bestTree
                                               optimal = doNext (thisIter - lastIter)
                                               doNext improvement | improvement < cutoff = (bestTree,bestParams,path)
-                                              doNext improvement | improvement < 100.0 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
+                                              doNext improvement | improvement < 0.1 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
                                               doNext improvement =  optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path                                                                                            
 
 optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path where
