@@ -61,9 +61,9 @@ calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL lef
 
 
 restructData (DLeaf name dist sequence partial _ _) model priors pi  = DLeaf name dist sequence partial model partial' where
-                                                                               partial' = calcLeafPL partial [dist] model
+                                                                               partial' = calcLeafPL partial dist model
 restructData (DINode left right dist _ _ ) model priors pi= DINode newleft newright dist model partial where
-                                                            partial = calcPL newleft newright [dist] model
+                                                            partial = calcPL newleft newright dist model
                                                             newleft = restructData left model priors pi
                                                             newright = restructData right model priors pi
 restructData (DTree left middle right _ pc _ _ ) model priors pi = DTree newleft newmiddle newright partial pc priors pi where 
@@ -78,10 +78,10 @@ structDataN hiddenClasses seqDataType pAln node = structDataN' hiddenClasses seq
 structDataN' hiddenClasses seqDataType (PatternAlignment names seqs columns patterns counts) transPat (Leaf name dist) = ans where
                                                                                                                           partial = getPartial hiddenClasses seqDataType sequence 
                                                                                                                           sequence = snd $ fromJust $ find (\(n,_) -> n==name) $ zip names transPat 
-                                                                                                                          ans = NLeaf name dist sequence partial 
+                                                                                                                          ans = NLeaf name [dist] sequence partial 
 
 
-structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right dist where
+structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right [dist] where
                                                                               left = structDataN' hiddenClasses seqDataType pA transPat c1
                                                                               right = structDataN' hiddenClasses seqDataType pA transPat c2
 
@@ -100,14 +100,15 @@ structDataN' hiddenClasses seqDataType pA transPat (Tree (Leaf name dist) (Leaf 
 structData hiddenClasses seqDataType pAln model transPat node = addModel (structDataN hiddenClasses seqDataType pAln node) model 
 
 
+
 addModelNNode :: NNode -> [BranchModel] -> [Double] -> [Vector Double] -> DNode
 addModelNNode (NLeaf name dist sequence partial) model _ _  = DLeaf name dist sequence partial model partial' where
-                                                                                              partial' = calcLeafPL partial [dist] model
+                                                                                              partial' = calcLeafPL partial dist model
 
 addModelNNode (NINode c1 c2 dist) model priors pi =  DINode left right dist model myPL where
                                                   left = addModelNNode c1 model priors pi
                                                   right = addModelNNode c2 model priors pi
-                                                  myPL = calcPL left right [dist] model 
+                                                  myPL = calcPL left right dist model 
                                                                             
 addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myPL pat priors pi where
                                   left = addModelNNode c1 model priors pi
@@ -178,11 +179,11 @@ gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl co
 
 type BranchModel = [Double] -> Matrix Double
 type OptModel = DNode -> [Double] -> Double
-data DNode = DLeaf {dName :: String,dDistance :: Double,sequence::String,tipLikelihoods::Matrix Double,p::([[Double] -> Matrix Double]),partialLikelihoods::[Matrix Double]} |
-        DINode DNode DNode Double ([[Double] -> Matrix Double]) [Matrix Double] | 
+data DNode = DLeaf {dName :: String,dDistance :: [Double],sequence::String,tipLikelihoods::Matrix Double,p::([[Double] -> Matrix Double]),partialLikelihoods::[Matrix Double]} |
+        DINode DNode DNode [Double] ([[Double] -> Matrix Double]) [Matrix Double] | 
         DTree DNode DNode DNode [Matrix Double] [Int] [Double] [(Vector Double)]
 
-data NNode = NLeaf String Double String (Matrix Double) | NINode NNode NNode Double | NTree NNode NNode NNode [Int]
+data NNode = NLeaf String [Double] String (Matrix Double) | NINode NNode NNode [Double] | NTree NNode NNode NNode [Int]
 data DataModel = DataModel {dTree::DNode, patterncounts::[Int], priors::[Double], pis::[Vector Double]}
 
 instance Show DNode where
@@ -211,12 +212,12 @@ getPL (DTree _ _ _ lkl _ _ _) = lkl
 goLeft (DTree (DINode l r dist model pL) middle right _ pC priors pi)  = DTree l r r' rootpL pC priors pi where
         rootpL = calcRootPL l r r'
         r' = DINode middle right dist model pL' 
-        pL' = calcPL middle right [dist] model
+        pL' = calcPL middle right dist model
 
 goRight (DTree left middle (DINode l r dist model pL) _ pC priors pi) = DTree l' l r rootpL pC priors pi where
         rootpL = calcRootPL l' l r
         l' = DINode left middle dist model pL'
-        pL' = calcPL left middle [dist] model
+        pL' = calcPL left middle dist model
 
 canGoLeft (DTree (DINode _ _ _ _ _) _ _ _ _ _ _ ) = True
 canGoLeft _ = False
@@ -241,13 +242,13 @@ descencents (DINode l r _ _ _) = (descencents l) ++ (descencents r)
 
 setLeftBL (DTree (DLeaf name dist seq tip model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
         partial' = calcLeafPL tip [x] model
-        newleft = DLeaf name x seq tip model partial'
+        newleft = DLeaf name [x] seq tip model partial'
         pl' = calcRootPL newleft m r 
 
 
 setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
         partial' = calcPL l1 r1 [x] model
-        newleft = DINode l1 r1 x model partial'
+        newleft = DINode l1 r1 [x] model partial'
         pl' = calcRootPL newleft m r 
 
 optLeftBL tree  = setLeftBL tree (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree x)))
@@ -257,24 +258,34 @@ swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
 
 getBL node = getBL' node []
 
-getBL' (DLeaf _ bl _ _ _ _) bls = bl:bls
-getBL' (DINode l r bl _ _) bls = bl:(getBL' l (getBL' r bls))
+getBL' (DLeaf _ bl _ _ _ _) bls = (bl) ++ bls
+getBL' (DINode l r bl _ _) bls = bl ++ (getBL' l (getBL' r bls))
 getBL' (DTree l m r _ _ _ _ ) bls = (getBL' l (getBL' m (getBL' r bls)))
 
+setBL :: [Double] -> DNode -> DNode 
 setBL bls node = fst $ setBL' bls node
-setBL' bls (DTree l m r pl pC priors pi) = ((DTree left middle right partial pC priors pi), remainder3) where
-                        (left,remainder) = setBL' bls l
-                        (middle,remainder2) = setBL' remainder m
-                        (right,remainder3) = setBL' remainder2 r
+setBL' = setBLX' 0
+
+setBLX' i bls (DTree l m r pl pC priors pi) = ((DTree left middle right partial pC priors pi), remainder3) where
+                        (left,remainder) = setBLX' i bls l
+                        (middle,remainder2) = setBLX' i remainder m
+                        (right,remainder3) = setBLX' i remainder2 r
                         partial = calcRootPL left middle right
 
-setBL' (bl2:bls) (DINode l r bl mats pl) = ((DINode left right bl2 mats partial), remainder2) where
-                             (left,remainder) = setBL' bls l
-                             (right,remainder2) = setBL' remainder r
-                             partial = calcPL left right [bl2] mats
+setBLX' i (bl2:bls) (DINode l r blstart mats pl) = ((DINode left right newbl mats partial), remainder2) where
+                             (left,remainder) = setBLX' i bls l
+                             (right,remainder2) = setBLX' i remainder r
+                             partial = calcPL left right (newbl) mats
+                             newbl = replace i bl2 blstart
 
-setBL' (bl:bls) (DLeaf a _ b tips model _) = ((DLeaf a bl b tips model pl),bls) where
-                                      pl = calcLeafPL tips [bl] model 
+setBLX' i (bl2:bls) (DLeaf a (blstart) b tips model _) = ((DLeaf a newbl b tips model pl),bls) where
+                                      pl = calcLeafPL tips newbl model 
+                                      newbl = replace i bl2 blstart
+
+
+replace 0 x (s:ss) = (x:ss)
+replace i x start = (take (i) start) ++ (x:(drop (i+1) start))
+
 
 
 zeroQMat size = diag $ constant 0.0 size
