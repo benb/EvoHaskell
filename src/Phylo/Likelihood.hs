@@ -62,11 +62,11 @@ calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL lef
 
 restructData (DLeaf name dist sequence partial _ _) model priors pi  = DLeaf name dist sequence partial model partial' where
                                                                                partial' = calcLeafPL partial dist model
-restructData (DINode left right dist _ _ ) model priors pi= DINode newleft newright dist model partial where
+restructData (DINode left right dist _ _ ) model priors pi= newleft `par` newright `par` DINode newleft newright dist model partial where
                                                             partial = calcPL newleft newright dist model
                                                             newleft = restructData left model priors pi
                                                             newright = restructData right model priors pi
-restructData (DTree left middle right _ pc _ _ ) model priors pi = DTree newleft newmiddle newright partial pc priors pi where 
+restructData (DTree left middle right _ pc _ _ ) model priors pi = newleft `par` newright `par` newmiddle `par` DTree newleft newmiddle newright partial pc priors pi where 
                                             partial = calcRootPL newleft newmiddle newright
                                             newleft = restructData left model priors pi
                                             newright = restructData right model priors pi
@@ -81,11 +81,11 @@ structDataN' hiddenClasses seqDataType (PatternAlignment names seqs columns patt
                                                                                                                           ans = NLeaf name [dist] sequence partial 
 
 
-structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right [dist] where
+structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = left `par` right `par` NINode left right [dist] where
                                                                               left = structDataN' hiddenClasses seqDataType pA transPat c1
                                                                               right = structDataN' hiddenClasses seqDataType pA transPat c2
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = NTree left middle right $ counts pA where
+structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = left `par` middle `par` right `par` NTree left middle right $ counts pA where
                                                                                   left = structDataN' hiddenClasses seqDataType pA transPat l
                                                                                   right = structDataN' hiddenClasses seqDataType pA transPat r
                                                                                   middle = structDataN' hiddenClasses seqDataType pA transPat $ addDist dist c2
@@ -105,12 +105,12 @@ addModelNNode :: NNode -> [BranchModel] -> [Double] -> [Vector Double] -> DNode
 addModelNNode (NLeaf name dist sequence partial) model _ _  = DLeaf name dist sequence partial model partial' where
                                                                                               partial' = calcLeafPL partial dist model
 
-addModelNNode (NINode c1 c2 dist) model priors pi =  DINode left right dist model myPL where
+addModelNNode (NINode c1 c2 dist) model priors pi =  left `par` right `par` DINode left right dist model myPL where
                                                   left = addModelNNode c1 model priors pi
                                                   right = addModelNNode c2 model priors pi
                                                   myPL = calcPL left right dist model 
                                                                             
-addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myPL pat priors pi where
+addModelNNode (NTree c1 c2 c3 pat) model priors pi = left `par` right `par` middle `par` DTree left middle right myPL pat priors pi where
                                   left = addModelNNode c1 model priors pi
                                   middle = addModelNNode c2 model priors pi
                                   right= addModelNNode c3 model priors pi
