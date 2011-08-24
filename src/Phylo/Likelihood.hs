@@ -256,15 +256,15 @@ swapLeftMiddle (DTree l m r pL pC priors pi) = DTree m l r pL pC priors pi
 swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
 
 
-getBL node = getBL' node []
+getBL node = concat $ getBL' node []
 
-getBL' (DLeaf _ bl _ _ _ _) bls = (bl) ++ bls
-getBL' (DINode l r bl _ _) bls = bl ++ (getBL' l (getBL' r bls))
+getBL' (DLeaf _ bl _ _ _ _) bls = bl : bls
+getBL' (DINode l r bl _ _) bls = bl : (getBL' l (getBL' r bls))
 getBL' (DTree l m r _ _ _ _ ) bls = (getBL' l (getBL' m (getBL' r bls)))
 
 setBL :: [Double] -> DNode -> DNode 
 setBL bls node = fst $ setBL' bls node
-setBL' = setBLX' 0
+setBL' x = setBLX' 0 [x]
 
 setBLX' i bls (DTree l m r pl pC priors pi) = ((DTree left middle right partial pC priors pi), remainder3) where
                         (left,remainder) = setBLX' i bls l
@@ -283,8 +283,8 @@ setBLX' i (bl2:bls) (DLeaf a (blstart) b tips model _) = ((DLeaf a newbl b tips 
                                       newbl = replace i bl2 blstart
 
 
-replace 0 x (s:ss) = (x:ss)
-replace i x start = (take (i) start) ++ (x:(drop (i+1) start))
+replace 0 [x] (s:ss) = (x:ss)
+replace i x start =  (take (i) start) ++ x ++ (drop (i-1 + (length x)) start)
 
 
 
