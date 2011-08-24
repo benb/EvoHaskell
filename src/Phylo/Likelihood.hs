@@ -188,7 +188,9 @@ data DataModel = DataModel {dTree::DNode, patterncounts::[Int], priors::[Double]
 
 instance Show DNode where
         show (DTree l m r _ _ _ _) = "("++(show l)++","++(show m)++","++(show r)++");"
+        show (DINode l r [d] _ _) = "(" ++ (show l)++","++(show r)++"):"++(show d)
         show (DINode l r d _ _) = "(" ++ (show l)++","++(show r)++"):"++(show d)
+        show (DLeaf name [d] _ _ _ _) = name++":"++(show d)
         show (DLeaf name d _ _ _ _) = name++":"++(show d)
 
 
@@ -222,16 +224,19 @@ goRight (DTree left middle (DINode l r dist model pL) _ pC priors pi) = DTree l'
 canGoLeft (DTree (DINode _ _ _ _ _) _ _ _ _ _ _ ) = True
 canGoLeft _ = False
 
-optBLD tree = t3 where
-        t1 = swapLeftMiddle $ optLeftBL $ if (canGoLeft tree) then optBL' (goLeft tree) else tree
-        t2 = swapLeftRight $ optLeftBL $ swapLeftMiddle $ if (canGoLeft t1) then goRight $ optBL' (goLeft t1) else t1
-        t3 = swapLeftRight $ optLeftBL $ if (canGoLeft t2) then goRight $ optBL' (goLeft t2) else t2
+optBLD = optBLDx optLeftBL
+optBLD0 = optBLDx (optLeftBLx 0)
 
-optBL' tree = ans where
-        leftOptd = if (canGoLeft tree) then goRight $ optBL' (goLeft tree) else tree
-        ansL = swapLeftMiddle $ optLeftBL leftOptd
-        midOptd = if (canGoLeft ansL) then goRight $ optBL' (goLeft ansL) else ansL
-        ans = swapLeftMiddle $ optLeftBL midOptd
+optBLDx f tree = t3 where
+        t1 = swapLeftMiddle $ optLeftBL $ if (canGoLeft tree) then optBL' f (goLeft tree) else tree
+        t2 = swapLeftRight $ optLeftBL $ swapLeftMiddle $ if (canGoLeft t1) then goRight $ optBL' f (goLeft t1) else t1
+        t3 = swapLeftRight $ optLeftBL $ if (canGoLeft t2) then goRight $ optBL' f (goLeft t2) else t2
+
+optBL' f tree = ans where
+        leftOptd = if (canGoLeft tree) then goRight $ optBL' f (goLeft tree) else tree
+        ansL = swapLeftMiddle $ f leftOptd
+        midOptd = if (canGoLeft ansL) then goRight $ optBL' f (goLeft ansL) else ansL
+        ans = swapLeftMiddle $ f midOptd
 
 
 descencents (DTree l m r _ _ _ _) = (descencents l) ++ (descencents m ) ++ (descencents r)
@@ -241,17 +246,35 @@ descencents (DINode l r _ _ _) = (descencents l) ++ (descencents r)
 --setLeftBL (DTree l m r _ _ _ _ ) x | trace ((show x ) ++ " (" ++ (descencents l) ++ " : " ++ (descencents m) ++ " : " ++ (descencents r) ++ ")") False = undefined
 
 setLeftBL (DTree (DLeaf name dist seq tip model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
-        partial' = calcLeafPL tip [x] model
-        newleft = DLeaf name [x] seq tip model partial'
+        partial' = calcLeafPL tip x model
+        newleft = DLeaf name x seq tip model partial'
         pl' = calcRootPL newleft m r 
 
 
 setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
-        partial' = calcPL l1 r1 [x] model
-        newleft = DINode l1 r1 [x] model partial'
+        partial' = calcPL l1 r1 x model
+        newleft = DINode l1 r1 x model partial'
         pl' = calcRootPL newleft m r 
 
-optLeftBL tree  = setLeftBL tree (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree x)))
+optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+                        (DTree l _ _ _ _ _ _ ) = tree
+                        best = case l of 
+                                (DINode _ _ [param] _ _) -> (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
+                                (DLeaf _ [param] _ _ _ _) -> (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
+                                (DLeaf _ params _ _ _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
+                                (DINode _ _ params _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
+
+getLeftBL (DTree (DINode _ _ x _ _) _ _ _ _ _ _) = x
+getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
+
+optLeftBLx val tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+                                startBL = getLeftBL tree
+                                b = goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val startBL [x])))
+                                best = replace val startBL [b] 
+
+
+boundedBLfunc = boundedFunction (-1E20) (repeat $ Just 0.0) (repeat Nothing)
+
 swapLeftMiddle (DTree l m r pL pC priors pi) = DTree m l r pL pC priors pi
 swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
 
@@ -282,11 +305,21 @@ setBLX' i (bl2:bls) (DLeaf a (blstart) b tips model _) = ((DLeaf a newbl b tips 
                                       pl = calcLeafPL tips newbl model 
                                       newbl = replace i bl2 blstart
 
+setBLX' _ [] _ = error "Insuffiencent branch lengths specified"
+
 
 replace 0 [x] (s:ss) = (x:ss)
-replace i x start =  (take (i) start) ++ x ++ (drop (i-1 + (length x)) start)
+replace i x start =  (take (i) start) ++ x ++ (drop (i + (length x)) start)
+
+listpartition (c:counts) start ans = listpartition counts b (a:ans) where
+                                 (a,b) = splitAt c start
+listpartition [] [] ans = reverse ans
+listpartition [] start ans = listpartition [] [] (start:ans)
 
 
+setBLflat i node = setBLflat' i node $ map length (getBL' node [])
+setBLflat' i node counts bls = setBLX' i (listpartition counts bls []) node
+                        
 
 zeroQMat size = diag $ constant 0.0 size
 
@@ -307,7 +340,10 @@ gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
 thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
                         priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) )
                         fullPi = makeFullPi priors pi
- 
+
+thmmPerBranchModel numCat s pi [priorZero,alpha] = ([thmmPerBranch numCat pi s priors alpha],[fullPi]) where 
+                        priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) )
+                        fullPi = makeFullPi priors pi
 
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
@@ -320,6 +356,11 @@ thmm numCat pi s priors alpha sigma = standardpT $ eigQ (fixDiag $ fromBlocks su
                                         size = cols s
                                         kk' mat i j | i==j = mat
                                                     | otherwise = diagRect 0.0 (mapVector ((priors !! j) * sigma * ) pi) size size
+
+thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> Matrix Double
+thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s priors alpha sigma [branchLength]
+thmmPerBranch numCat pi s priors alpha paramList | trace ("thmmpb " ++ (show paramList)) False = undefined
+
 
 
 
@@ -340,10 +381,11 @@ optBL :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> Double -> DNode
 optBL model t' params priors cutoff = traceShow optTree optTree where
         tree  = addModelFx t' (model params) priors
         optTree = optBLD $ optBLD tree
-        {-optBLFunc = loggedFunc . boundedFunction (-1E20) (repeat $ Just 0.0) (repeat $ Nothing) . rawOptBLFunc   -}
-        {-rawOptBLFunc t params = logLikelihood $ setBL params t-}
-        {-(optBLs,_) = maximize NMSimplex2 1E-3 10000 (map (\i->0.1) (getBL tree)) (optBLFunc tree) (getBL tree)-}
-        {-optTree = setBL optBLs tree-}
+
+optBLx :: (AddTree t) => Int ->  ModelF -> t -> [Double] -> [Double] -> Double -> DNode
+optBLx val model t' params priors cutoff = traceShow optTree optTree where
+                tree  = addModelFx t' (model params) priors
+                optTree = optBLD $ optBLD tree
  
 optParams :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> [Double]
 optParams model t' params priors lower upper cutoff = bestParams where
@@ -362,13 +404,13 @@ optParamsAndBL' model tree params priors lower upper cutoff lastIter path | trac
                                               thisIter = logLikelihood bestTree
                                               optimal = doNext (thisIter - lastIter)
                                               doNext improvement | improvement < cutoff = (bestTree,bestParams,path)
-                                              doNext improvement | improvement < 0.1 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
+                                              doNext improvement | improvement < 100.0 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
                                               doNext improvement =  optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path                                                                                            
 
 optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = optParamsAndBL' model bestTree bestParams priors lower upper cutoff thisIter path where
                                                                         numParams = length params
                                                                         optFunc = loggedFunc $ boundedFunction (-1E20) (lower ++ (repeat $ Just 0.0)) (upper ++ (repeat Nothing)) rawFunc
-                                                                        rawFunc testparams = logLikelihood $ addModelFx (setBL (drop numParams testparams) tree) (model $ take numParams testparams) priors
+                                                                        rawFunc testparams = logLikelihood $ addModelFx (fst $ setBLflat 0 tree (drop numParams testparams)) (model $ take numParams testparams) priors
                                                                         startParams = params ++ (getBL tree)
                                                                         (optParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.01) startParams) optFunc startParams
                                                                         (bestParams,bestBL) = splitAt numParams optParams
