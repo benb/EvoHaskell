@@ -15,6 +15,7 @@ import Control.Exception as E
 import Control.Parallel
 import Control.Parallel.Strategies
 import Debug.Trace
+import Phylo.Data
 
 
 -- |Combine two sets of partial likelihoods along two branches
@@ -239,11 +240,11 @@ optBL' f tree = ans where
         ans = swapLeftMiddle $ f midOptd
 
 
-descencents (DTree l m r _ _ _ _) = (descencents l) ++ (descencents m ) ++ (descencents r)
-descencents (DLeaf name _ _ _ _ _) = name ++ ","
-descencents (DINode l r _ _ _) = (descencents l) ++ (descencents r)
+descendents (DTree l m r _ _ _ _) = (descendents l) ++ (descendents m ) ++ (descendents r)
+descendents (DLeaf name _ _ _ _ _) = [name] 
+descendents (DINode l r _ _ _) = (descendents l) ++ (descendents r)
 
---setLeftBL (DTree l m r _ _ _ _ ) x | trace ((show x ) ++ " (" ++ (descencents l) ++ " : " ++ (descencents m) ++ " : " ++ (descencents r) ++ ")") False = undefined
+--setLeftBL (DTree l m r _ _ _ _ ) x | trace ((show x ) ++ " (" ++ (descendents l) ++ " : " ++ (descendents m) ++ " : " ++ (descendents r) ++ ")") False = undefined
 
 setLeftBL (DTree (DLeaf name dist seq tip model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
         partial' = calcLeafPL tip x model
@@ -278,6 +279,14 @@ boundedBLfunc = boundedFunction (-1E20) (repeat $ Just 0.0) (repeat Nothing)
 swapLeftMiddle (DTree l m r pL pC priors pi) = DTree m l r pL pC priors pi
 swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
 
+
+getSplits node = map invertSplit $ getSplits' node [] where
+                        alldescendents = sort $ descendents node
+                        invertSplit s = ((sort s), filter (\x -> x `elem` s) alldescendents) 
+
+getSplits' (DTree l m r _ _ _ _ ) splits = (getSplits' l (getSplits' m (getSplits' r splits)))
+getSplits' (DINode l r _ _ _ ) splits = (descendents l ++ descendents r):(getSplits' l (getSplits' r splits))
+getSplits' (DLeaf name _ _ _ _ _) splits = [name]:splits
 
 getBL node = concat $ getBL' node []
 
@@ -317,7 +326,7 @@ listpartition [] [] ans = reverse ans
 listpartition [] start ans = listpartition [] [] (start:ans)
 
 
-setBLflat i node = setBLflat' i node $ map length (getBL' node [])
+setBLflat i node = setBLflat' i node $ map (\x -> (length x) - i) (getBL' node [])
 setBLflat' i node counts bls = setBLX' i (listpartition counts bls []) node
                         
 
@@ -375,7 +384,6 @@ maximize method pre maxiter size f params = minimize method pre maxiter size (in
 
 invert f = (*(-1)). f
 
-optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     
 
 optBL :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> Double -> DNode
 optBL model t' params priors cutoff = traceShow optTree optTree where
@@ -393,8 +401,17 @@ optParams model t' params priors lower upper cutoff = bestParams where
         optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc       
         rawOptParamsFunc t params = logLikelihood $ addModelFx t (model params) priors                                                                                    
         (bestParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params    
-        
 
+optBSParams :: (AddTree t) => ModelF -> t -> [Double] -> Int -> [Int] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> [Double]
+optBSParams model t' params startBS mapping priors lower upper cutoff | trace "OK" True = bestParams where
+        tree | traceShow (take startBS params) True = addModelFx t' (model $ take startBS params) priors
+        optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc
+        rawOptParamsFunc t p2  = logLikelihood $ addModelFx (mySetBL t (drop startBS p2)) (model (take startBS p2)) priors
+        mySetBL t p = fst $ setBLflat 1 t (map (p!!) mapping)
+        (bestParams,_) =  maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params  
+
+        
+optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     
 
 optParamsAndBL' :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])  
 optParamsAndBL' model tree params priors lower upper cutoff lastIter path | trace ("OK2" ++ (show lastIter)) $ True = optimal where                                                                                                                                                        
@@ -416,3 +433,11 @@ optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = opt
                                                                         (bestParams,bestBL) = splitAt numParams optParams
                                                                         bestTree = addModelFx (setBL bestBL tree) (model bestParams) priors
                                                                         thisIter = logLikelihood bestTree
+--TODO eradicate this function!
+dummyTree :: (AddTree t) => t -> DNode 
+dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
+
+makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> [a]
+makeMapping splitmap t = map splitmap (traceX (getSplits $ dummyTree t))
+
+traceX x = traceShow x x
