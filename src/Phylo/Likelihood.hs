@@ -229,9 +229,9 @@ optBLD = optBLDx optLeftBL
 optBLD0 = optBLDx (optLeftBLx 0)
 
 optBLDx f tree = t3 where
-        t1 = swapLeftMiddle $ optLeftBL $ if (canGoLeft tree) then optBL' f (goLeft tree) else tree
-        t2 = swapLeftRight $ optLeftBL $ swapLeftMiddle $ if (canGoLeft t1) then goRight $ optBL' f (goLeft t1) else t1
-        t3 = swapLeftRight $ optLeftBL $ if (canGoLeft t2) then goRight $ optBL' f (goLeft t2) else t2
+        t1 = swapLeftMiddle $ f $ if (canGoLeft tree) then optBL' f (goLeft tree) else tree
+        t2 = swapLeftRight $ f $ swapLeftMiddle $ if (canGoLeft t1) then goRight $ optBL' f (goLeft t1) else t1
+        t3 = swapLeftRight $ f $ if (canGoLeft t2) then goRight $ optBL' f (goLeft t2) else t2
 
 optBL' f tree = ans where
         leftOptd = if (canGoLeft tree) then goRight $ optBL' f (goLeft tree) else tree
@@ -268,10 +268,10 @@ optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikel
 getLeftBL (DTree (DINode _ _ x _ _) _ _ _ _ _ _) = x
 getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 
-optLeftBLx val tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
                                 startBL = getLeftBL tree
-                                b = goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val startBL [x])))
-                                best = replace val startBL [b] 
+                                b = goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
+                                best = replace val [b] startBL
 
 
 boundedBLfunc = boundedFunction (-1E20) (repeat $ Just 0.0) (repeat Nothing)
@@ -402,13 +402,22 @@ optParams model t' params priors lower upper cutoff = bestParams where
         rawOptParamsFunc t params = logLikelihood $ addModelFx t (model params) priors                                                                                    
         (bestParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params    
 
-optBSParams :: (AddTree t) => ModelF -> t -> [Double] -> Int -> [Int] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> [Double]
-optBSParams model t' params startBS mapping priors lower upper cutoff | trace "OK" True = bestParams where
-        tree | traceShow (take startBS params) True = addModelFx t' (model $ take startBS params) priors
+optBSParams ::  ModelF -> DNode -> [Double] -> Int -> [Int] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
+optBSParams | trace "OK" True = optBSParams' (-1E20) 
+
+optBSParams' lastIter model t' params startBS mapping priors lower upper cutoff = optimal where
+        tree = addModelFx (mySetBL t' (drop startBS params)) (model $ take startBS params) priors
         optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc
         rawOptParamsFunc t p2  = logLikelihood $ addModelFx (mySetBL t (drop startBS p2)) (model (take startBS p2)) priors
         mySetBL t p = fst $ setBLflat 1 t (map (p!!) mapping)
-        (bestParams,_) =  maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params  
+        bestTree' | trace ("last iter " ++ (show tree)) True = optBLD0 $ addModelFx (mySetBL tree (drop startBS params)) (model (take startBS params)) priors
+        (bestParams,_) | trace ("Opt tree " ++ (show bestTree') ++ "\n" ++ (show $ logLikelihood bestTree') ++ "\n" ++ (show $ logLikelihood (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors )) ++ (show (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors ) )) True =  maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc bestTree') params  
+        bestTree = addModelFx (mySetBL bestTree' (drop startBS bestParams)) (model (take startBS bestParams)) priors
+        thisIter | trace ("Best tree " ++ (show bestTree)) True = traceXP "iteration" $  logLikelihood bestTree
+        optimal = doNext (thisIter - lastIter)
+        doNext improvement | improvement < cutoff = (bestTree,bestParams)
+        doNext improvement = optBSParams' thisIter model bestTree bestParams startBS mapping priors lower upper cutoff
+
 
         
 optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     
@@ -441,3 +450,4 @@ makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> [a]
 makeMapping splitmap t = map splitmap (traceX (getSplits $ dummyTree t))
 
 traceX x = traceShow x x
+traceXP p x = trace (p ++ " " ++ (show x)) x
