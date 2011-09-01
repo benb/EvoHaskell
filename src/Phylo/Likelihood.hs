@@ -282,7 +282,7 @@ swapLeftRight (DTree l m r pL pC priors pi) = DTree r m l pL pC priors pi
 
 getSplits node = map invertSplit $ getSplits' node [] where
                         alldescendents = sort $ descendents node
-                        invertSplit s = ((sort s), filter (\x -> x `elem` s) alldescendents) 
+                        invertSplit s = ((sort s), filter (\x -> not $ x `elem` s) alldescendents) 
 
 getSplits' (DTree l m r _ _ _ _ ) splits = (getSplits' l (getSplits' m (getSplits' r splits)))
 getSplits' (DINode l r _ _ _ ) splits = (descendents l ++ descendents r):(getSplits' l (getSplits' r splits))
@@ -297,6 +297,28 @@ getBL' (DTree l m r _ _ _ _ ) bls = (getBL' l (getBL' m (getBL' r bls)))
 setBL :: [Double] -> DNode -> DNode 
 setBL bls node = fst $ setBL' bls node
 setBL' x = setBLX' 0 [x]
+
+setBLMapped i (DTree l m r _ pC priors pi) mapping = DTree left middle right partial pC priors pi where
+        left = setBLMapped i l mapping
+        middle = setBLMapped i m mapping
+        right = setBLMapped i r mapping
+        partial = calcRootPL left middle right
+
+setBLMapped i (DINode l r blstart mats pl) mapping = DINode left right newbl mats partial where
+        left = setBLMapped i l mapping
+        right = setBLMapped i r mapping
+        partial = calcPL left right (newbl) mats
+        initBL = take i blstart
+        endBL = mapping (DINode left right blstart mats pl)
+        newbl = initBL ++ endBL
+
+setBLMapped i (DLeaf a blstart b tips model pl) mapping = DLeaf a newbl b tips model partial where
+        partial = calcLeafPL tips newbl model
+        initBL = take i blstart
+        endBL = mapping (DLeaf a blstart b tips model pl)
+        newbl = initBL ++ endBL
+
+
 
 setBLX' i bls (DTree l m r pl pC priors pi) = ((DTree left middle right partial pC priors pi), remainder3) where
                         (left,remainder) = setBLX' i bls l
@@ -402,14 +424,16 @@ optParams model t' params priors lower upper cutoff = bestParams where
         rawOptParamsFunc t params = logLikelihood $ addModelFx t (model params) priors                                                                                    
         (bestParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params    
 
-optBSParams ::  ModelF -> DNode -> [Double] -> Int -> [Int] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
+optBSParams ::  ModelF -> DNode -> [Double] -> Int -> (DNode -> Int) -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
 optBSParams | trace "OK" True = optBSParams' (-1E20) 
 
+optBSParams' ::  Double -> ModelF -> DNode -> [Double] -> Int -> (DNode -> Int) -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
 optBSParams' lastIter model t' params startBS mapping priors lower upper cutoff = optimal where
         tree = addModelFx (mySetBL t' (drop startBS params)) (model $ take startBS params) priors
         optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc
         rawOptParamsFunc t p2  = logLikelihood $ addModelFx (mySetBL t (drop startBS p2)) (model (take startBS p2)) priors
-        mySetBL t p = fst $ setBLflat 1 t (map (p!!) mapping)
+        mySetBL t p = setBLMapped 1 t (getParamF p)
+        getParamF p node = [(p !! (mapping node))]
         bestTree' | trace ("last iter " ++ (show tree)) True = optBLD0 $ addModelFx (mySetBL tree (drop startBS params)) (model (take startBS params)) priors
         (bestParams,_) | trace ("Opt tree " ++ (show bestTree') ++ "\n" ++ (show $ logLikelihood bestTree') ++ "\n" ++ (show $ logLikelihood (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors )) ++ (show (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors ) )) True =  maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc bestTree') params  
         bestTree = addModelFx (mySetBL bestTree' (drop startBS bestParams)) (model (take startBS bestParams)) priors
@@ -446,8 +470,15 @@ optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = opt
 dummyTree :: (AddTree t) => t -> DNode 
 dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
 
-makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> [a]
-makeMapping splitmap t = map splitmap (traceX (getSplits $ dummyTree t))
+makeMapping :: (AddTree t, Show a) => (([String],[String]) -> a) -> t -> (DNode -> a) 
+makeMapping splitmap t = lookupF where
+        splits = getSplits $ dummyTree t
+        splitList = zip splits $ map splitmap splits
+        eitherSideList = splitList >>= (\((a,b),c)->[(a,c),(b,c)]) 
+        lookupF node = case find (\(x,a) -> (sort x) == (sort $ descendents node)) eitherSideList of
+                            Just (_,y) -> y
+                            Nothing -> error $ "Can't find " ++ (show (sort $ descendents node)) ++ "\nin " ++ (show eitherSideList) 
+
 
 traceX x = traceShow x x
 traceXP p x = trace (p ++ " " ++ (show x)) x

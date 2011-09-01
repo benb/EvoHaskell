@@ -60,9 +60,9 @@ main = do args <- getArgs
                                                         newBL = map (\x -> x:0.0:[]) startBL
                                                         t3 = fst $ setBLX' 0 newBL t2
                                                         goodNodes = map (filter (/=',')) $ groupBy (\x y -> y /= ',') spl
-                                                        mapped | traceShow goodNodes True = map (\x -> if x then 0 else 1) $ makeMapping (\(x,y) -> ((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) t3
+                                                        mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then (trace "OK0" 0) else (trace "OK1" 1)) t3
                                                         model | traceShow t3 True = thmmPerBranchModel 5 wagS piF 
-                                                        (optTree,[priorZero,alpha,sigma0,sigma1]) | traceShow mapped True = optBSParams model t3 [0.1,0.5,2.0,2.0] 2 mapped [1.0] [Just 0.01,Just 0.001,Just 0.0,Just 0.0] [Just 0.99,Nothing,Nothing,Nothing] 0.01
+                                                        (optTree,[priorZero,alpha,sigma0,sigma1]) = optBSParams model t3 [0.1,0.5,1.0,2.0] 2 mapped [1.0] [Just 0.01,Just 0.001,Just 0.0,Just 0.0] [Just 0.99,Nothing,Nothing,Nothing] 0.01
                                                        -- optTree = optBLD0 $ (addModelFx t3 (model [priorZero,alpha])) bls
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
