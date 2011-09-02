@@ -16,6 +16,7 @@ import Control.Parallel
 import Control.Parallel.Strategies
 import Debug.Trace
 import Phylo.Data
+import System.Random
 
 
 -- |Combine two sets of partial likelihoods along two branches
@@ -186,6 +187,12 @@ data DNode = DLeaf {dName :: String,dDistance :: [Double],sequence::String,tipLi
 
 data NNode = NLeaf String [Double] String (Matrix Double) | NINode NNode NNode [Double] | NTree NNode NNode NNode [Int]
 data DataModel = DataModel {dTree::DNode, patterncounts::[Int], priors::[Double], pis::[Vector Double]}
+
+getLeaves node = getLeaves' node []
+getLeaves' :: DNode -> [DNode] -> [DNode]
+getLeaves' (DTree l m r _ _ _ _) xs = getLeaves' r $ getLeaves' m $ getLeaves' l xs
+getLeaves' (DINode l r _ _ _) xs = getLeaves' l $ getLeaves' r xs
+getLeaves' leaf xs = (leaf:xs)
 
 instance Show DNode where
         show (DTree l m r _ _ _ _) = "("++(show l)++","++(show m)++","++(show r)++");"
@@ -482,3 +489,68 @@ makeMapping splitmap t = lookupF where
 
 traceX x = traceShow x x
 traceXP p x = trace (p ++ " " ++ (show x)) x
+
+
+genList :: StdGen -> [StdGen]
+genList stdGen = first:remainder where
+        (first,next) = split stdGen
+        remainder = genList next
+
+makeSimulatedTree seqDataType hiddenClasses stdGen length (DTree l m r _ _ priors pis) = DTree left middle right pLs (replicate length 1) priors pis where
+        left = makeSimulatedTree' seqDataType hiddenClasses leftR topSeq models l
+        middle = makeSimulatedTree' seqDataType hiddenClasses middleR topSeq models m
+        right = makeSimulatedTree' seqDataType hiddenClasses rightR topSeq models r
+        pLs = calcRootPL l m r
+        (r0:r1:leftR:middleR:rightR:remainder) = genList stdGen
+        models = take length $ map (drawFromDist priors) $ randomRs (0.0,1.0) r0
+        drawLetters :: [Int]
+        drawLetters = map (\(p,pri) -> drawFromDist pri p) $ zip (randomRs (0.0,1.0) r1) $ map toList $ map (pis!!) models
+        topSeq :: [Int]
+        topSeq = take length drawLetters 
+
+makeSimulatedTree' :: SeqDataType -> Int -> StdGen -> [Int] -> [Int] -> DNode -> DNode
+makeSimulatedTree' Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimplemented"
+
+makeSimulatedTree' AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist _ _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
+        myMats :: [Matrix Double]
+        myMats = map (\x -> x dist) modelList
+        myVectors :: [[[Double]]]
+        myVectors = map toLists $ map (myMats!!) models
+        myVectors' = (map (\(vec,base) -> vec!!base) $ zip myVectors topSeq)
+        bottomSeq = map (aaOrder!!) $ map (`mod` 20 ) $ map (\(p,pris) -> drawFromDist pris p) $ zip (randomRs (0.0,1.0) stdGen) myVectors'
+        pLs = calcLeafPL tipLkl dist modelList
+        tipLkl = getPartial hiddenClasses AminoAcid bottomSeq
+
+makeSimulatedTree' seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
+        myMats :: [Matrix Double]
+        myMats = map (\x -> x dist) modelList
+        myVectors :: [[[Double]]]
+        myVectors = map toLists $ map (myMats!!) models
+        (r0:leftR:rightR:_) = genList stdGen 
+        bottomSeqPartial :: [(Double,[Double])]
+        bottomSeqPartial = zip (randomRs (0.0,1.0) r0) (map (\(vec,base) -> vec!!base) $ zip myVectors topSeq) 
+        bottomSeq = map (\(p,pris) -> drawFromDist pris p) bottomSeqPartial
+        left = makeSimulatedTree' seqDataType hiddenClasses leftR bottomSeq models l
+        right = makeSimulatedTree' seqDataType hiddenClasses rightR bottomSeq models r
+        pLs = calcPL left right dist modelList
+
+drawFromDist pris = drawFromDist' $ map nonNeg pris where
+        nonNeg x | x < 0.0 = 0.0
+        nonNeg x = x
+
+drawFromDist' pris | (sum pris) < 1.0 = drawFromDist' normPris where
+        normPris = map (/total) pris
+        total = sum pris
+
+drawFromDist' pris = drawFromDist'' 0 pris
+
+drawFromDist'' :: Int -> [Double] -> Double -> Int
+--drawFromDist' c pris p | trace ((show c) ++ " " ++ (show pris) ++ " " ++ (show p)) False = undefined
+drawFromDist'' c (pri:pris) p = if (p <= pri) then c else (drawFromDist'' (c+1) pris (p-pri))
+
+simulateSequences seqDataType hiddenClasses stdGen length root = quickListAlignment names seqs where
+        simTree  = makeSimulatedTree seqDataType hiddenClasses stdGen length root
+        leaves = getLeaves simTree
+        names = map dName leaves
+        seqs = map Phylo.Likelihood.sequence leaves
+

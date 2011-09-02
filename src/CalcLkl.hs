@@ -10,18 +10,21 @@ import Phylo.Opt
 import Numeric.GSL.Minimization
 import Data.Packed.Vector
 import Debug.Trace
+import System.Random
 
 
-data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String
+data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
             Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model",
             Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
             Option ['n'] ["opt-thmmplus"] (NoArg OptThmmP) "Optimise THMM Model",
-            Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM"]
+            Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
+            Option [] ["sim1"] (NoArg OptSim1) "Simulation 1"]
 
 main = do args <- getArgs
+          stdGen <- getStdGen
           (aln,tree,remainOpts) <- case getOpt Permute options args of 
                          (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
                                                                                tree <- (liftM readBiNewickTree) (readFile tre)
@@ -66,6 +69,15 @@ main = do args <- getArgs
                                                        -- optTree = optBLD0 $ (addModelFx t3 (model [priorZero,alpha])) bls
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
+                (Just a,Right t,OptSim1:[]) -> putStrLn $ concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 1000 t2 where
+                                                        alpha = 0.5
+                                                        priorZero = 0.1
+                                                        sigma0 = 10.0
+                                                        sigma1 = 0.01
+                                                        piF = fromList $ scaledAAFrequencies a
+                                                        t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 wagS piF [priorZero,alpha]) [1.0]
+                                                        goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
+                                                        mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
                 (_,_,_) -> error "Can't parse something"
 
  
