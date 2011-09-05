@@ -65,17 +65,17 @@ main = do args <- getArgs
                                                         goodNodes = map (filter (/=',')) $ groupBy (\x y -> y /= ',') spl
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then (trace "OK0" 0) else (trace "OK1" 1)) t3
                                                         model | traceShow t3 True = thmmPerBranchModel 5 wagS piF 
-                                                        (optTree,[priorZero,alpha,sigma0,sigma1]) = optBSParams model t3 [0.1,0.5,1.0,2.0] 2 mapped [1.0] [Just 0.01,Just 0.001,Just 0.0,Just 0.0] [Just 0.99,Nothing,Nothing,Nothing] 0.01
+                                                        (optTree,[priorZero,alpha,sigma0,sigma1]) = optBSParams model t3 [0.1,0.5,2.0,2.0] 2 mapped [1.0] [Just 0.01,Just 0.001,Just 0.0,Just 0.0] [Just 0.99,Nothing,Nothing,Nothing] 0.0001
                                                        -- optTree = optBLD0 $ (addModelFx t3 (model [priorZero,alpha])) bls
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,OptSim1:[]) -> putStrLn $ concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 1000 t2 where
-                                                        alpha = 0.5
-                                                        priorZero = 0.1
-                                                        sigma0 = 10.0
-                                                        sigma1 = 0.01
+                (Just a,Right t,OptSim1:[]) -> putStrLn $ concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 349 t2 where
+                                                        alpha = 0.8335109218715334
+                                                        priorZero = 0.1907077998691572
+                                                        sigma0 = 15.631076379213784
+                                                        sigma1 = 1.0836675920110694e-8
                                                         piF = fromList $ scaledAAFrequencies a
-                                                        t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 wagS piF [priorZero,alpha]) [1.0]
+                                                        t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 cpRevS cpRevPi [priorZero,alpha]) [1.0]
                                                         goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
                 (_,_,_) -> error "Can't parse something"
