@@ -5,6 +5,12 @@ import Data.Packed.Vector
 import Data.List
 import Data.Maybe
 import Debug.Trace
+import System.IO
+
+parsePamlDatIO :: String -> IO (Matrix Double, Vector Double)
+parsePamlDatIO filename = do contents <- readFile filename
+                             return $ parsePamlDat $ lines contents
+
 
 cpRevPi :: Vector Double
 cpRevPi = fromList $ [0.0755,0.0621,0.0410,0.0371,0.0091,0.0382,0.0495,0.0838,0.0246,0.0806,0.1011,0.0504,0.0220,0.0506,0.0431,0.0622,0.0543,0.0181,0.0307,0.0660]
