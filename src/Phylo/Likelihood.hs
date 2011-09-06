@@ -63,17 +63,25 @@ calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (ma
 calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL left) (getPL right)
 
 
-restructData (DLeaf name dist sequence partial _ _) model priors pi  = DLeaf name dist sequence partial model partial' where
-                                                                               partial' = calcLeafPL partial dist model
-restructData (DINode left right dist _ _ ) model priors pi= newleft `par` newright `par` DINode newleft newright dist model partial where
-                                                            partial = calcPL newleft newright dist model
-                                                            newleft = restructData left model priors pi
-                                                            newright = restructData right model priors pi
-restructData (DTree left middle right _ pc _ _ ) model priors pi = newleft `par` newright `par` newmiddle `par` DTree newleft newmiddle newright partial pc priors pi where 
+restructData node model priors pi = restructDataMapped node (\x -> model) priors pi
+
+restructDataMapped :: DNode -> (DNode -> [BranchModel]) -> [Double] -> [Vector Double] -> DNode 
+restructDataMapped leaf@(DLeaf name dist sequence partial _ _) model priors pi  = DLeaf name dist sequence partial myModel partial' where
+                                                                               partial' = calcLeafPL partial dist myModel
+                                                                               myModel = model leaf
+
+restructDataMapped inode@(DINode left right dist _ _ ) model priors pi= newleft `par` newright `par` DINode newleft newright dist myModel partial where
+                                                            partial = calcPL newleft newright dist myModel
+                                                            myModel = model inode
+                                                            newleft = restructDataMapped left model priors pi
+                                                            newright = restructDataMapped right model priors pi
+restructDataMapped tree@(DTree left middle right _ pc _ _ ) model priors pi = newleft `par` newright `par` newmiddle `par` DTree newleft newmiddle newright partial pc priors pi where 
                                             partial = calcRootPL newleft newmiddle newright
-                                            newleft = restructData left model priors pi
-                                            newright = restructData right model priors pi
-                                            newmiddle = restructData middle model priors pi  
+                                            newleft = restructDataMapped left model priors pi
+                                            newright = restructDataMapped right model priors pi
+                                            newmiddle = restructDataMapped middle model priors pi  
+
+
 
 structDataN :: Int -> SeqDataType -> PatternAlignment -> Node -> NNode
 
@@ -215,6 +223,8 @@ instance AddTree DNode where
         addModel w x y z = ans2 where 
                            ans = restructData w x y z
                            ans2 = seq (getPL ans) ans
+
+
 
 getPL (DLeaf _ _ _ _ _ lkl) = lkl
 getPL (DINode _ _ _ _ lkl) = lkl
@@ -504,14 +514,14 @@ optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = opt
 dummyTree :: (AddTree t) => t -> DNode 
 dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
 
-makeMapping :: (AddTree t, Show a) => (([String],[String]) -> a) -> t -> (DNode -> a) 
+makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> (DNode -> a) 
 makeMapping splitmap t = lookupF where
         splits = getSplits $ dummyTree t
-        splitList = zip splits $ map splitmap splits
+        splitList = zip splits $ map splitmap splits 
         eitherSideList = splitList >>= (\((a,b),c)->[(a,c),(b,c)]) 
         lookupF node = case find (\(x,a) -> (sort x) == (sort $ descendents node)) eitherSideList of
                             Just (_,y) -> y
-                            Nothing -> error $ "Can't find " ++ (show (sort $ descendents node)) ++ "\nin " ++ (show eitherSideList) 
+                            Nothing -> error $ "Can't find in " ++ (show (sort $ descendents node)) ++ "\nin " ++ (show $ map fst eitherSideList) 
 
 
 traceX x = traceShow x x

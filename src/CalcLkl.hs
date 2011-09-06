@@ -13,7 +13,7 @@ import Debug.Trace
 import System.Random
 
 
-data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1
+data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
@@ -21,7 +21,8 @@ options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment"
             Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
             Option ['n'] ["opt-thmmplus"] (NoArg OptThmmP) "Optimise THMM Model",
             Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
-            Option [] ["sim1"] (NoArg OptSim1) "Simulation 1"]
+            Option [] ["sim1"] (NoArg OptSim1) "Simulation 1",
+            Option [] ["sim2"] (NoArg OptSim2) "Simulation 2"]
 
 main = do args <- getArgs
           stdGen <- getStdGen
@@ -78,7 +79,21 @@ main = do args <- getArgs
                                                         t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 cpRevS cpRevPi [priorZero,alpha]) [1.0]
                                                         goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
+                (Just a,Right t,OptSim2:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
+                                                  (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
+                                                  putStrLn $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
+                                                        compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 349 t3 where
+                                                                alpha = 0.8335109218715334
+                                                                priorZero = 0.1907077998691572
+                                                                sigma0 = 15.631076379213784
+                                                                sigma1 = 1.0836675920110694e-8
+                                                                piF = fromList $ scaledAAFrequencies a
+                                                                (model0,pi_0) = thmmPerBranchModel 5 s0 pi0 [priorZero,alpha]
+                                                                (model1,pi_1) = thmmPerBranchModel 5 s1 pi1 [priorZero,alpha]
+                                                                t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 cpRevS cpRevPi [priorZero,alpha]) [1.0]
+                                                                tfFunc x y = ((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))
+                                                                goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
+                                                                mapped = makeMapping (\(x,y) -> if (tfFunc x y)  then ([sigma0]) else ([sigma1])) t2
+                                                                mappedModels = makeMapping (\(x,y) -> if (tfFunc x y) then model1 else model0) t2
+                                                                t3 = restructDataMapped t2 mappedModels [1.0] pi_0
                 (_,_,_) -> error "Can't parse something"
-
- 
-
