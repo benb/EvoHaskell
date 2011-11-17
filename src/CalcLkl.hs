@@ -1,3 +1,5 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import Phylo.Alignment
@@ -13,31 +15,41 @@ import Debug.Trace
 import System.Random
 
 
-data Flag = AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2
+data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
+            Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
+            Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
             Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model",
             Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
             Option ['n'] ["opt-thmmplus"] (NoArg OptThmmP) "Optimise THMM Model",
             Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
+            Option [] ["sim0"] (ReqArg OptSim0 "PARAMS") "Simulate WAG",
             Option [] ["sim1"] (NoArg OptSim1) "Simulation 1",
-            Option [] ["sim2"] (NoArg OptSim2) "Simulation 2"]
+            Option [] ["sim2"] (ReqArg OptSim2 "PARAMS") "Simulation 2"]
 
 main = do args <- getArgs
-          stdGen <- getStdGen
-          (aln,tree,remainOpts) <- case getOpt Permute options args of 
+          (aln,tree,stdGen,remainOpts) <- case getOpt Permute options args of 
+                         (((AlignmentFile aln):(TreeFile tre):(Seed seed):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
+                                                                                           tree <- (liftM readBiNewickTree) (readFile tre)
+                                                                                           let stdGen = mkStdGen $ read seed
+                                                                                           return (aln,tree,stdGen,xs)
                          (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
                                                                                tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                               return (aln,tree,xs)
+                                                                               stdGen <- getStdGen
+                                                                               return (aln,tree,stdGen,xs)
                          (_,_,msgs) -> error $ concat msgs
-          case (aln,tree,remainOpts) of 
+          let (cats,remainOpts') = case remainOpts of 
+                (NumCats n):rem -> (read n,rem)
+                rem -> (4,rem)
+          case (aln,tree,remainOpts') of 
                 (Just a,Right t,[])-> putStrLn $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,(Alpha val):[])-> putStrLn $ "WAG Gamma lkl:" ++ (show $ quickGamma 4 (read val) a t wagPi wagS)
+                (Just a,Right t,(Alpha val):[])-> putStrLn $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
                 (Just a,Right t,(OptAlpha):[])-> putStrLn $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                         t2 = structDataN 1 AminoAcid (pAlignment a) t
                                                         piF = fromList $ scaledAAFrequencies a
-                                                        model = gammaModel 4 wagS piF
+                                                        model = gammaModel cats wagS piF
                                                         (optTree,[logalpha],_) = optParamsAndBL model t2 [0.5] [0.25,0.25,0.25,0.25] [Just 0.001] [Nothing] 0.01
                                                         alpha = exp logalpha
                                                         lkl = logLikelihood optTree
@@ -49,7 +61,7 @@ main = do args <- getArgs
                                                         lkl = logLikelihood optTree
                 (Just a,Right t,(OptThmmP):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                         piF = fromList $ scaledAAFrequencies a
-                                                        t2 = addModelFx (structDataN 5 AminoAcid (pAlignment a) t) (gammaModel 4 wagS piF [0.5]) $ flatPriors 4                                                                                                                                                                
+                                                        t2 = addModelFx (structDataN 5 AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                                
                                                         startBL = getBL t2
                                                         newBL = map (\x -> x:0.0:[]) startBL
                                                         t3 = fst $ setBLX' 0 newBL t2
@@ -59,7 +71,7 @@ main = do args <- getArgs
                                                         lkl = logLikelihood optTree
                 (Just a,Right t,(OptThmm2 spl):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                         piF = fromList $ scaledAAFrequencies a
-                                                        t2 = addModelFx (structDataN 5 AminoAcid (pAlignment a) t) (gammaModel 4 wagS piF [0.5]) $ flatPriors 4                                                                                                                                                                
+                                                        t2 = addModelFx (structDataN 5 AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             
                                                         startBL = getBL t2
                                                         newBL = map (\x -> x:0.0:[]) startBL
                                                         t3 = fst $ setBLX' 0 newBL t2
@@ -79,14 +91,17 @@ main = do args <- getArgs
                                                         t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 cpRevS cpRevPi [priorZero,alpha]) [1.0]
                                                         goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
-                (Just a,Right t,OptSim2:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
-                                                  (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
-                                                  putStrLn $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
-                                                        compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 349 t3 where
-                                                                alpha = 0.8335109218715334
-                                                                priorZero = 0.1907077998691572
-                                                                sigma0 = 15.631076379213784
-                                                                sigma1 = 1.0836675920110694e-8
+                (Just a,Right t,(OptSim0 params):[]) -> putStrLn $ concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 349 t2 where
+                                                        alpha:sigma0:sigma1:priorZero:[] = map (read) $ words params
+                                                        piF = fromList $ scaledAAFrequencies a
+                                                        t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN 5 AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel 5 wagS piF [priorZero,alpha]) [1.0]
+                                                        goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] 
+                                                        mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
+                (Just a,Right t,OptSim2 params:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
+                                                         (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
+                                                         putStrLn $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
+                                                             compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid 5 stdGen 349 t3 where
+                                                                alpha:sigma0:sigma1:priorZero:[] = map (read) $ words params
                                                                 piF = fromList $ scaledAAFrequencies a
                                                                 (model0,pi_0) = thmmPerBranchModel 5 s0 pi0 [priorZero,alpha]
                                                                 (model1,pi_1) = thmmPerBranchModel 5 s1 pi1 [priorZero,alpha]
