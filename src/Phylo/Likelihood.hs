@@ -44,10 +44,12 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
                                         
 
 logLikelihoodModel :: DNode -> Double
-logLikelihoodModel (DTree left middle right pLs pC priors pis) = sumLikelihoods pC likelihoods where
-                                                                likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
-                                                                likelihoods = map summarise (transpose likelihoodss) 
-                                                                summarise lkl = sum $ zipWith (*) lkl priors
+logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLikelihoods pC $ likelihoods root where
+
+likelihoods :: DNode -> [Double]
+likelihoods (DTree _ _ _ pL _ priors pis) = map summarise (transpose likelihoodss) where
+                                                summarise lkl = sum $ zipWith (*) lkl priors
+                                                likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
                                                                 
 logLikelihood = logLikelihoodModel
 
@@ -62,7 +64,25 @@ calcLeafPL :: Matrix Double -> [Double] -> [BranchModel] -> [Matrix Double]
 calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (map (\x -> x dist) model)
 calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL left) (getPL right)
 
+{-- gives [[[Matrix Double]]] where [branch [proc [left/right Matrix]]] --}
+{-- need to map from [branch [l/r [proc Matrix]]] --}
+getPartialBranchEnds :: DNode -> [[[Matrix Double]]]
+getPartialBranchEnds (DTree left middle right pLS pC priors pis) = fixup ((branchPL left):(branchPL middle):(branchPL right):(leftPL ++ midPL ++ rightPL)) where
+                                leftPL = getPartialBranchEnds left
+                                midPL = getPartialBranchEnds middle
+                                rightPL = getPartialBranchEnds right
+                                fixup :: [[[Matrix Double]]] -> [[[Matrix Double]]]
+                                fixup (x:xs) = (fixup' x):(fixup xs)
+                                fixup [] = []
+                                fixup' :: [[Matrix Double]] -> [[Matrix Double]]
+                                fixup' x = (map (\(x,y)-> [x,y]) $ zip (head x) (head2 x))
+                                head2 = head . drop 1
+                
+getPartialBranchEnds (DINode l r dist _ _) = (branchPL l):(branchPL r):((getPartialBranchEnds l) ++ (getPartialBranchEnds r))
+getPartialBranchEnds (DLeaf _ _ _ _ _ _) = []
 
+branchPL :: DNode -> [[Matrix Double]]
+branchPL left = [(getPL left), allPLC ((map (\x-> x (getDist left))) $ getModel left) (getPL left)]  
 restructData node model priors pi = restructDataMapped node (\x -> model) priors pi
 
 restructDataMapped :: DNode -> (DNode -> [BranchModel]) -> [Double] -> [Vector Double] -> DNode 
@@ -230,6 +250,15 @@ getPL (DLeaf _ _ _ _ _ lkl) = lkl
 getPL (DINode _ _ _ _ lkl) = lkl
 getPL (DTree _ _ _ lkl _ _ _) = lkl
 
+getDist (DLeaf _ dist _ _ _ _) = dist
+getDist (DINode _ _ dist _ _) = dist
+getDist root = []
+
+getModel (DLeaf _ _ _ _ model _) = model
+getModel (DINode _ _ _ model _) = model
+getModel root = error "No model for root"
+
+
 goLeft (DTree (DINode l r dist model pL) middle right _ pC priors pi)  = DTree l r r' rootpL pC priors pi where
         rootpL = calcRootPL l r r'
         r' = DINode middle right dist model pL' 
@@ -307,6 +336,7 @@ getSplits' (DINode l r _ _ _ ) splits = (descendents l ++ descendents r):(getSpl
 getSplits' (DLeaf name _ _ _ _ _) splits = [name]:splits
 
 getBL node = concat $ getBL' node []
+getPriors (DTree _ _ _ _ _ priors _ ) = priors
 
 getBL' (DLeaf _ bl _ _ _ _) bls = bl : bls
 getBL' (DINode l r bl _ _) bls = bl : (getBL' l (getBL' r bls))
