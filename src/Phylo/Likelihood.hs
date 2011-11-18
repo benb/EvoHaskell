@@ -432,14 +432,20 @@ thmmPerBranchModel numCat s pi [priorZero,alpha] = ([thmmPerBranch numCat pi s p
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
 thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> BranchModel
-thmm numCat pi s priors alpha sigma = standardpT $ eigQ (fixDiag $ fromBlocks subMats) fullPi where
+thmm numCat pi s priors alpha sigma = standardpT $ eigQ (thmmQ numCat pi s priors alpha sigma) fullPi where
+                                               fullPi = makeFullPi priors pi
+
+thmmQ :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
+thmmQ numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where 
+                                        subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats 
                                         qMats = (zeroQMat (rows s)) : (map (\(i,mat) -> setRate i mat pi) $ zip (gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi)
                                         subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats
                                         getRow i mat = map (kk' mat i) [0..(numCat-1)] 
-                                        fullPi = makeFullPi priors pi
                                         size = cols s
                                         kk' mat i j | i==j = mat
                                                     | otherwise = diagRect 0.0 (mapVector ((priors !! j) * sigma * ) pi) size size
+
+
 
 thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> Matrix Double
 thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s priors alpha sigma [branchLength]
