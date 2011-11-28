@@ -1,6 +1,3 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
-import Foreign
-import Foreign.C.Types
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import Phylo.Alignment
