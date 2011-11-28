@@ -19,7 +19,18 @@ combineQ submats = fromBlocks allSubmats where
                         tmpSubmats = map (\(mat,i) -> (replicate i zeroMat) ++ (mat: (replicate (len - i -1) zeroMat))) nonSubmats
                         allSubmats = tmpSubmats
                         len = length submats
+instance Element Int
+interLMat :: Int -> Int -> [[Int]]
+interLMat size alphabet = toLists $ fromBlocks allSubmats where
+                          diagMat = buildMatrix alphabet alphabet (\(i,j) -> if (i==j) then 1 else 0)
+                          zeroMat = buildMatrix alphabet alphabet (\(i,j) -> 0)
+                          allSubmats = map (\i -> (replicate i diagMat) ++ (zeroMat : (replicate (size - 1 - i) diagMat))) [0..(size-1)]
 
+intraLMat :: Int -> Int -> [[Int]]
+intraLMat size alphabet = toLists $ fromBlocks allSubmats where
+                          invDiagMat = buildMatrix alphabet alphabet (\(i,j) -> if (i==j) then 0 else 1)
+                          zeroMat = buildMatrix alphabet alphabet (\(i,j) -> 0)
+                          allSubmats = map (\i -> (replicate i zeroMat) ++ (invDiagMat : (replicate (size - 1 - i) zeroMat))) [0..(size-1)]
 makeQ matS pi = runSTMatrix $ do 
                 let rawQ = matS <>(diag pi)
                 let rowTots = map (sumElements) $ toRows (rawQ)

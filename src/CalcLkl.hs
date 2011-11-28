@@ -14,15 +14,19 @@ import Numeric.GSL.Minimization
 import Data.Packed.Vector
 import Debug.Trace
 import System.Random
-foreign import ccall "stochmap.h CalculateAndWrite"
-     c_CalculateAndWrite :: CInt -> CInt -> CInt -> CInt -> CInt -> Ptr (Ptr (Ptr (Ptr CInt))) -> Ptr (Ptr CInt) -> Ptr CInt -> Ptr CInt -> Ptr (Ptr (Ptr (Ptr (Ptr CDouble)))) -> Ptr (Ptr (Ptr CDouble)) -> Ptr (Ptr CDouble) -> Ptr (Ptr CDouble) -> Ptr CDouble -> Ptr CDouble -> Ptr CFile -> IO ()
+import Data.Packed.Matrix
+import System.IO
+import System.Posix.Types
+import System.Posix.IO
+import Foreign.C.String (CString,newCString)
+import Phylo.Matrix
+import Stochmap
 
-
-
-data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String
+data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
             Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
+            Option [] ["stochmap"] (ReqArg ThmmStochmap "PARAMS") "Calculate stochastic mapping for Thmm",
             Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
             Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model",
@@ -61,25 +65,32 @@ main = do args <- getArgs
                                                         t2 = structDataN 5 AminoAcid (pAlignment a) t                                                                                                                                                                       
                                                         piF = fromList $ scaledAAFrequencies a
                                                         model = thmmModel 5 wagS piF
-                                                        (optTree,[priorZero,alpha,sigma],_) = optParamsAndBL model t2 [0.1,0.5,1.0] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Nothing,Nothing] 0.01
+                                                        (optTree,[priorZero,alpha,sigma],_) = optParamsAndBL model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Nothing,Nothing] 0.01
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(ThmmStochmap params ):[])-> let alpha:sigma:priorZero:[] = map read $ words params
-                                                             c_CalculateAndWrite nSite nState nBranch nProc nCols scales lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs where
-                                                               pAln = pAlignment a
-                                                               (nSiteRaw,nColsRaw,multiplicitesRaw) = getAlnData pAln where
-                                                                  getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
-                                                               model = thmmModel 5 wagS piF
-                                                               t2 = structDataN 5 AminoAcid (pAln) t                                                                                                                                                                       
-                                                               piF = fromList $ scaledAAFrequencies a
-                                                               nSite <- newArray nSiteRaw
-                                                               nCols <- newArray nColsRaw
-                                                               multiplicites <- newArray multiplicitesRaw
-                                                               lMat <- newArray2 $ makeIntraLMat 5 20
-                                                               nProc = length model
-                                                               pi_i <- newArray piF
-                                                               branchLengths <- newArray $ getBL t2
-                                                               mixProbs <- newArray $ getPriors t2
-                                                        (optTree,[priorZero,alpha,sigma],_) = optParamsAndBL model t2 [0.1,0.5,1.0] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Nothing,Nothing] 0.01
+                (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ words params
+                                                                let firstColumn (ListAlignment names seqs columns) = ListAlignment names (transpose $ [head columns]) [head columns] 
+                                                                let pAln = pAlignment a -- $ firstColumn a
+                                                                let (nSite,nCols,multiplicites) = getAlnData pAln where
+                                                                    getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
+                                                                let piF = fromList $ scaledAAFrequencies a
+                                                                let model = thmmModel 5 wagS piF [priorZero,alpha,sigma]
+                                                                let t2 = addModelFx (structDataN 5 AminoAcid (pAln) t) model [1.0]
+                                                                let nState = 100
+                                                                let lMat = intraLMat 5 20
+                                                                let nProc = 1 {-- fixme --}
+                                                                let pi_i = map toList (snd model) 
+                                                                let mixProbs = getPriors t2
+                                                                let qMat = thmmModelQ 5 wagS piF [priorZero,alpha,sigma]
+                                                                let qset = [toLists qMat]
+                                                                let pBEStr = getPartialBranchEnds t2
+                                                                let partials = map (map (map (toLists . trans))) $ toPBEList pBEStr
+                                                                let branchLengths = toPBELengths pBEStr
+                                                                let nBranch =  length $ toPBELengths pBEStr
+                                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
+                                                                let sitemap = mapBack pAln
+                                                                handle <- openFile "out.txt" WriteMode
+                                                                calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs handle
+                                                                {-c_test chandle $ fromIntegral 10-}
                 (Just a,Right t,(OptThmmP):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                         piF = fromList $ scaledAAFrequencies a
                                                         t2 = addModelFx (structDataN 5 AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                                
@@ -134,16 +145,4 @@ main = do args <- getArgs
                                                                 t3 = restructDataMapped t2 mappedModels [1.0] pi_0
                 (_,_,_) -> error "Can't parse something"
 
-newArray2 :: [[Storable]] -> IO Ptr Ptr Storable
-newArray2 array = do aList <- mapM newArray array
-                     array <- newArray aList
-                     return array
-
-makeIntraLMat -> Int -> Int -> [[Int]]
-makeIntraLMat nClass alphabet = makeIntraLMat' nClass alphabet (nClass*alphabet - 1) [] 
-makeIntraLMat' nClass alphabet -1 xs = xs
-makeIntraLMat' nClass alphabet pos xs = makeIntraLMat' nClass alphabet (pos-1) ((getRow pos):xs)  where
-        getRow i = (replicate (chunk * 20) 0) ++ allOne ++ (replicate (nClass - chunk -1) * 20) where
-                chunk = i `div` (nClass * alphabet)
-                allOne = replicate 20 1
 

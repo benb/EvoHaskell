@@ -47,7 +47,7 @@ logLikelihoodModel :: DNode -> Double
 logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLikelihoods pC $ likelihoods root where
 
 likelihoods :: DNode -> [Double]
-likelihoods (DTree _ _ _ pL _ priors pis) = map summarise (transpose likelihoodss) where
+likelihoods (DTree _ _ _ pLs _ priors pis) = map summarise (transpose likelihoodss) where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
                                                 likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
                                                                 
@@ -57,6 +57,8 @@ data PatternAlignment = PatternAlignment {names :: [String], seqs::[String], col
 
 pAlignment (ListAlignment names seqs columns) = PatternAlignment names seqs columns patterns counts where
                                                    (patterns,counts) = unzip $ map (\x -> (head x,length x)) $ group $ sort columns
+mapBack :: PatternAlignment -> [Int]
+mapBack (PatternAlignment _ _ columns patterns _) = map (\x->fromJust $ findIndex (==x) patterns) columns
 
 calcPL :: DNode -> DNode -> [Double] -> [BranchModel] -> [Matrix Double]
 calcPL left right dist model = allPLC (map (\x-> x dist) model) $ allCombine (getPL left) (getPL right) 
@@ -66,23 +68,38 @@ calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL lef
 
 {-- gives [[[Matrix Double]]] where [branch [proc [left/right Matrix]]] --}
 {-- need to map from [branch [l/r [proc Matrix]]] --}
-getPartialBranchEnds :: DNode -> [[[Matrix Double]]]
-getPartialBranchEnds (DTree left middle right pLS pC priors pis) = fixup ((branchPL left):(branchPL middle):(branchPL right):(leftPL ++ midPL ++ rightPL)) where
-                                leftPL = getPartialBranchEnds left
-                                midPL = getPartialBranchEnds middle
-                                rightPL = getPartialBranchEnds right
-                                fixup :: [[[Matrix Double]]] -> [[[Matrix Double]]]
-                                fixup (x:xs) = (fixup' x):(fixup xs)
-                                fixup [] = []
-                                fixup' :: [[Matrix Double]] -> [[Matrix Double]]
-                                fixup' x = (map (\(x,y)-> [x,y]) $ zip (head x) (head2 x))
-                                head2 = head . drop 1
-                
-getPartialBranchEnds (DINode l r dist _ _) = (branchPL l):(branchPL r):((getPartialBranchEnds l) ++ (getPartialBranchEnds r))
-getPartialBranchEnds (DLeaf _ _ _ _ _ _) = []
+toPBEList :: [([Matrix Double],[Matrix Double],Double)] -> [[[Matrix Double]]]
+toPBEList ((f,s,_):xs) = (map (\(i,j) -> [i,j]) $ zip f s):(toPBEList xs)
+toPBEList [] = []
 
-branchPL :: DNode -> [[Matrix Double]]
-branchPL left = [(getPL left), allPLC ((map (\x-> x (getDist left))) $ getModel left) (getPL left)]  
+toPBELengths :: [([Matrix Double],[Matrix Double],Double)] -> [Double]
+toPBELengths ((_,_,dist):xs) = dist:(toPBELengths xs)
+toPBELengths [] = []
+
+getPartialBranchEnds :: DNode -> [([Matrix Double],[Matrix Double],Double)]
+getPartialBranchEnds tree = getPartialBranchEnds' $ allRootings tree
+getPartialBranchEnds' (x:xs) = (getPartialBranchEndsLeaves'' x) ++ (getPartialBranchEndsX' xs) -- first tree is special case, only do leaves
+getPartialBranchEndsX' (x:xs) = (getPartialBranchEnds'' x) ++ (getPartialBranchEndsX' xs)
+getPartialBranchEndsX' [] = []
+getPartialBranchEnds'' (DTree left middle right pLS _ _ _) = (branchPL right,noright,head $ getBL right): remainder where
+                                                                noright = allCombine (getPL left) (getPL middle) 
+                                                                remainder = (calc left middle) ++ (calc middle left)
+                                                                calc node other = case (node,other) of 
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o) -> [(branchPL l,allCombine (getPL o) (getPL right),head $ getBL l)]
+                                                                                       (_,o) -> []
+
+getPartialBranchEndsLeaves'' (DTree left middle right pLS _ _ _) = remainder where
+                                                                noright = allCombine (getPL left) (getPL middle) 
+                                                                remainder = (calc right middle left) ++ (calc left middle right) ++ (calc middle left right)
+                                                                calc node other other'= case (node,other,other') of 
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o,o') -> [(branchPL l,allCombine (getPL o) (getPL o'),head $ getBL l)]
+                                                                                       (_,_,_) -> []
+
+
+branchPL :: DNode -> [Matrix Double]
+branchPL (DLeaf _ _ _ leafPL _ endPL) = map (\x->leafPL) endPL
+branchPL (DINode l r _ _ endPL) = map (\(x,y)-> combinePartial x y) (zip (getPL l) (getPL r))
+
 restructData node model priors pi = restructDataMapped node (\x -> model) priors pi
 
 restructDataMapped :: DNode -> (DNode -> [BranchModel]) -> [Double] -> [Vector Double] -> DNode 
@@ -271,6 +288,8 @@ goRight (DTree left middle (DINode l r dist model pL) _ pC priors pi) = DTree l'
 
 canGoLeft (DTree (DINode _ _ _ _ _) _ _ _ _ _ _ ) = True
 canGoLeft _ = False
+canGoMid (DTree _ (DINode _ _ _ _ _) _ _ _ _ _ ) = True
+canGoMid _ = False
 
 optBLD = optBLDx optLeftBL
 optBLD0 = optBLDx (optLeftBLx 0)
@@ -286,6 +305,29 @@ optBL' f tree = ans where
         midOptd = if (canGoLeft ansL) then goRight $ optBL' f (goLeft ansL) else ansL
         ans = swapLeftMiddle $ f midOptd
 
+allRootings tree = ans where
+        midTree = swapLeftMiddle tree
+        rightTree = swapLeftRight tree
+        leftRootings = if (canGoLeft tree) then (tree' : allLM (tree')) else [] 
+        midRootings = if (canGoLeft midTree) then (midTree' : allLM (midTree')) else [] 
+        rightRootings = if (canGoLeft rightTree) then (rightTree' : allLM (rightTree')) else [] 
+        tree' = goLeft tree
+        midTree' = goLeft midTree
+        rightTree' = goLeft rightTree
+        ans  = tree : (leftRootings ++ midRootings ++ rightRootings)
+
+
+allLM tree = a ++ b where
+               a = allLeftRootings tree
+               b = allMidRootings tree
+
+allMidRootings tree | canGoMid tree = t2 : (allLM t2) where
+                                      t2 = goLeft $ swapLeftMiddle tree
+allMidRootings tree = []
+
+allLeftRootings tree | canGoLeft tree = t2 : (allLM t2) where
+                                        t2 = goLeft tree
+allLeftRootings tree = []
 
 descendents (DTree l m r _ _ _ _) = (descendents l) ++ (descendents m ) ++ (descendents r)
 descendents (DLeaf name _ _ _ _ _) = [name] 
@@ -422,11 +464,17 @@ gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
                                 eigenS  = quickEigen pi s
 
 thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
-                        priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) )
+                        priors =  (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
                         fullPi = makeFullPi priors pi
 
+{-- TODO refactor this out --}
+thmmModelQ numCat s pi [priorZero,alpha,sigma] = (thmmQ numCat pi s priors alpha sigma) where
+                        priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
+                        fullPi = makeFullPi priors pi
+
+
 thmmPerBranchModel numCat s pi [priorZero,alpha] = ([thmmPerBranch numCat pi s priors alpha],[fullPi]) where 
-                        priors = priorZero : (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) )
+                        priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
                         fullPi = makeFullPi priors pi
 
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
@@ -438,8 +486,8 @@ thmm numCat pi s priors alpha sigma = standardpT $ eigQ (thmmQ numCat pi s prior
 thmmQ :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
 thmmQ numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where 
                                         subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats 
-                                        qMats = (zeroQMat (rows s)) : (map (\(i,mat) -> setRate i mat pi) $ zip (gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi)
-                                        subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats
+                                        qMats = (map (\(i,mat) -> setRate i mat pi) $ zip (map (*factor) $ gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi) ++ [(zeroQMat (rows s))]
+                                        factor = 1.0 / (1.0 - (last priors))
                                         getRow i mat = map (kk' mat i) [0..(numCat-1)] 
                                         size = cols s
                                         kk' mat i j | i==j = mat
