@@ -555,14 +555,6 @@ optBLx val model t' params priors cutoff = traceShow optTree optTree where
                 tree  = addModelFx t' (model params) priors
                 optTree = optBLD $ optBLD tree
  
-optParams :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> [Double]
-optParams model t' params priors lower upper cutoff = bestParams where
-        tree = addModelFx t' (model params) priors
-        optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc       
-        rawOptParamsFunc t params = logLikelihood $ addModelFx t (model params) priors                                                                                    
-        --(bestParams,_) = maximizeDG lower upper VectorBFGS2 1E-4 100000 0.1 1E-4 (optParamsFunc tree) params    
-        (bestParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params    
-
 genericOpt opt maxiter size precision lower upper func initialParams = fst $ maximize opt precision maxiter size (boundedFunction (-1E20) lower upper func) initialParams
 simplexOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> [Double]
 simplexOpt l u f p = genericOpt NMSimplex2 100000 (map (\x->0.1) p) 1e-4 l u f p
@@ -650,58 +642,6 @@ enforceBounds l u p = enforce (>) u $ enforce (<) l p where
                         Just x' -> if (f y x') then x' else y
 
 
-optBSParams ::  ModelF -> DNode -> [Double] -> Int -> (DNode -> Int) -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
-optBSParams | trace "OK" True = optBSParams' (-1E20) 
-
-optBSParams' ::  Double -> ModelF -> DNode -> [Double] -> Int -> (DNode -> Int) -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
-optBSParams' lastIter model t' params startBS mapping priors lower upper cutoff = optimal where
-        tree = addModelFx (mySetBL t' (drop startBS params)) (model $ take startBS params) priors
-        optParamsFunc = loggedFunc . boundedFunction (-1E20) lower upper . rawOptParamsFunc
-        rawOptParamsFunc t p2  = logLikelihood $ addModelFx (mySetBL t (drop startBS p2)) (model (take startBS p2)) priors
-        mySetBL t p = setBLMapped 1 t (getParamF p)
-        getParamF p node = [(p !! (mapping node))]
-        bestTree' | trace ("last iter " ++ (show tree)) True = optBLD0 $ addModelFx (mySetBL tree (drop startBS params)) (model (take startBS params)) priors
-        (bestParams,_) | trace ("Opt tree " ++ (show bestTree') ++ "\n" ++ (show $ logLikelihood bestTree') ++ "\n" ++ (show $ logLikelihood (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors )) ++ (show (addModelFx (mySetBL bestTree' (drop startBS params)) (model $ take startBS params) priors ) )) True =  maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc bestTree') params  
-        bestTree = addModelFx (mySetBL bestTree' (drop startBS bestParams)) (model (take startBS bestParams)) priors
-        thisIter | trace ("Best tree " ++ (show bestTree)) True = traceXP "iteration" $  logLikelihood bestTree
-        optimal = doNext (thisIter - lastIter)
-        doNext improvement | improvement < cutoff = (bestTree,bestParams)
-        doNext improvement | improvement < 1.0 = optBSParams' thisIter model bestTree2 bestParams2 startBS mapping priors lower upper cutoff
-        doNext improvement  = optBSParams' thisIter model bestTree bestParams startBS mapping priors lower upper cutoff 
-        rawFunc testparams = logLikelihood $ addModelFx (fst $ setBLflat 0 tree (drop startBS testparams)) (model $ take startBS testparams) priors
-        rawOptParamsBLFunc :: [Double] -> Double
-        rawOptParamsBLFunc p2 = logLikelihood $ fst $ setBLX' 0 (map (\x->[x]) $ drop (length params) p2) $ (addModelFx (mySetBL bestTree (drop startBS p2)) (model (take startBS p2)) priors)
-        optParamsBLFunc = boundedFunction (-1E20) (lower ++ (repeat $  Just 0.0001)) (upper ++ (repeat $ Just 50.0)) rawOptParamsBLFunc
-        bestALLParams = fst $  maximize NMSimplex2 1E-4 100000 (repeat 0.01) optParamsBLFunc (bestParams ++ (getBL bestTree))
-        bestParams2 = take (length params) bestALLParams
-        bestTree2 = fst $ setBLX' 0 (map (\x->[x]) $ drop (length params) bestALLParams) $ (addModelFx (mySetBL bestTree (drop startBS bestALLParams)) (model (take startBS bestALLParams)) priors)
-        
-                
-
-
-        
-{-optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' False model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     -}
-
-optParamsAndBL' :: (AddTree t) => Bool -> ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])  
-optParamsAndBL' canEnd model tree params priors lower upper cutoff lastIter path | trace ("OK2" ++ (show lastIter)) $ True = optimal where                                                                                                                                                        
-                                              tree' = optBL model tree params priors cutoff
-                                              bestParams = optParams model tree' params priors lower upper cutoff
-                                              bestTree = optBL model tree' bestParams priors cutoff
-                                              thisIter = logLikelihood bestTree
-                                              optimal = doNext (thisIter - lastIter)
-                                              doNext improvement | improvement < cutoff && canEnd = (bestTree,bestParams,path)
-                                              doNext improvement | improvement < 0.05 = optParamsAndBL'' model bestTree bestParams priors lower upper cutoff thisIter path
-                                              doNext improvement =  optParamsAndBL' False model bestTree bestParams priors lower upper cutoff thisIter path                                                                                            
-
-optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = optParamsAndBL' True model bestTree bestParams priors lower upper cutoff thisIter path where
-                                                                        numParams = length params
-                                                                        optFunc = loggedFunc $ boundedFunction (-1E20) (lower ++ (repeat $ Just 0.0)) (upper ++ (repeat Nothing)) rawFunc
-                                                                        rawFunc testparams = logLikelihood $ addModelFx (fst $ setBLflat 0 tree (drop numParams testparams)) (model $ take numParams testparams) priors
-                                                                        startParams = params ++ (getBL tree)
-                                                                        (optParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.01) startParams) optFunc startParams
-                                                                        (bestParams,bestBL) = splitAt numParams optParams
-                                                                        bestTree | trace ("BESTTREE " ++ (show bestParams) ++ " " ++ (show bestBL)) True = addModelFx (fst $ setBLflat 0 tree bestBL) (model bestParams) priors
-                                                                        thisIter = logLikelihood bestTree
 --TODO eradicate this function!
 dummyTree :: (AddTree t) => t -> DNode 
 dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
