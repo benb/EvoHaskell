@@ -26,8 +26,10 @@ boundedFunction :: Double -> [Maybe Double] -> [Maybe Double] -> ([Double] -> Do
 boundedFunction bad lower upper f vals = if ok
                                          then ans
                                          else bad where
-                                         lowerok = Nothing == (find (==True) $ map (\(bound,i) -> (fromJust bound) > i)$ filter boundset $ zip lower vals)
-                                         upperok = Nothing == (find (==True) $ map (\(bound,i) -> (fromJust bound) < i)$ filter boundset $ zip upper vals)
+                                         lowerProbs = findIndex (==True) $ map (\(bound,i) -> (fromJust bound) > i)$ filter boundset $ zip lower vals
+                                         upperProbs = findIndex (==True) $ map (\(bound,i) -> (fromJust bound) < i)$ filter boundset $ zip upper vals
+                                         lowerok = Nothing == lowerProbs
+                                         upperok = Nothing == upperProbs
                                          boundset (bound,i) = isJust bound
                                          ok = lowerok && upperok
                                          ans = f vals

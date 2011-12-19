@@ -68,31 +68,32 @@ calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL lef
 
 {-- gives [[[Matrix Double]]] where [branch [proc [left/right Matrix]]] --}
 {-- need to map from [branch [l/r [proc Matrix]]] --}
-toPBEList :: [([Matrix Double],[Matrix Double],Double)] -> [[[Matrix Double]]]
-toPBEList ((f,s,_):xs) = (map (\(i,j) -> [i,j]) $ zip f s):(toPBEList xs)
+toPBEList ((f,s,_,_):xs) = (map (\(i,j) -> [i,j]) $ zip f s):(toPBEList xs)
 toPBEList [] = []
 
-toPBELengths :: [([Matrix Double],[Matrix Double],Double)] -> [Double]
-toPBELengths ((_,_,dist):xs) = dist:(toPBELengths xs)
+toPBELengths ((_,_,dist,_):xs) = dist:(toPBELengths xs)
 toPBELengths [] = []
 
-getPartialBranchEnds :: DNode -> [([Matrix Double],[Matrix Double],Double)]
+toPBESplits = map (\(_,_,_,a) -> a)
+
+getPartialBranchEnds :: DNode -> [([Matrix Double],[Matrix Double],Double,([String],[String]))]
 getPartialBranchEnds tree = getPartialBranchEnds' $ allRootings tree
 getPartialBranchEnds' (x:xs) = (getPartialBranchEndsLeaves'' x) ++ (getPartialBranchEndsX' xs) -- first tree is special case, only do leaves
 getPartialBranchEndsX' (x:xs) = (getPartialBranchEnds'' x) ++ (getPartialBranchEndsX' xs)
 getPartialBranchEndsX' [] = []
-getPartialBranchEnds'' (DTree left middle right pLS _ _ _) = (branchPL right,noright,head $ getBL right): remainder where
+getPartialBranchEnds'' (DTree left middle right pLS _ _ _) = (branchPL right,noright,head $ getBL right,splits): remainder where
                                                                 noright = allCombine (getPL left) (getPL middle) 
                                                                 remainder = (calc left middle) ++ (calc middle left)
                                                                 calc node other = case (node,other) of 
-                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o) -> [(branchPL l,allCombine (getPL o) (getPL right),head $ getBL l)]
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o) -> [(branchPL l,allCombine (getPL o) (getPL right),head $ getBL l,((descendents o) ++ (descendents right), descendents l))]
                                                                                        (_,o) -> []
+                                                                splits = ((descendents left) ++ (descendents middle), (descendents right))
 
 getPartialBranchEndsLeaves'' (DTree left middle right pLS _ _ _) = remainder where
                                                                 noright = allCombine (getPL left) (getPL middle) 
                                                                 remainder = (calc right middle left) ++ (calc left middle right) ++ (calc middle left right)
                                                                 calc node other other'= case (node,other,other') of 
-                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o,o') -> [(branchPL l,allCombine (getPL o) (getPL o'),head $ getBL l)]
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o,o') -> [(branchPL l,allCombine (getPL o) (getPL o'),head $ getBL l,((descendents o) ++ (descendents o'), descendents l))]
                                                                                        (_,_,_) -> []
 
 
@@ -257,7 +258,7 @@ instance AddTree NNode where
                        ans = addModelNNode w x y z
                        ans2 = seq (getPL ans) ans
 instance AddTree DNode where
-        addModel w x y z = ans2 where 
+        addModel w x y z | trace "ADDMODELFX" True  = ans2 where 
                            ans = restructData w x y z
                            ans2 = seq (getPL ans) ans
 
@@ -333,6 +334,10 @@ descendents (DTree l m r _ _ _ _) = (descendents l) ++ (descendents m ) ++ (desc
 descendents (DLeaf name _ _ _ _ _) = [name] 
 descendents (DINode l r _ _ _) = (descendents l) ++ (descendents r)
 
+nonRootNodes (DTree l m r _ _ _ _) = (nonRootNodes l) ++ (nonRootNodes m) ++ (nonRootNodes r)
+nonRootNodes node@(DINode l r _ _ _) = node : ((nonRootNodes l) ++ (nonRootNodes r))
+nonRootNodes node@(DLeaf _ _ _ _ _ _) = [node]
+
 --setLeftBL (DTree l m r _ _ _ _ ) x | trace ((show x ) ++ " (" ++ (descendents l) ++ " : " ++ (descendents m) ++ " : " ++ (descendents r) ++ ")") False = undefined
 
 setLeftBL (DTree (DLeaf name dist seq tip model _) m r _ pC priors pi) x = (DTree newleft m r pl' pC priors pi) where
@@ -383,6 +388,11 @@ getPriors (DTree _ _ _ _ _ priors _ ) = priors
 getBL' (DLeaf _ bl _ _ _ _) bls = bl : bls
 getBL' (DINode l r bl _ _) bls = bl : (getBL' l (getBL' r bls))
 getBL' (DTree l m r _ _ _ _ ) bls = (getBL' l (getBL' m (getBL' r bls)))
+
+getLinearMap mapping (DTree l m r _ _ _ _ ) ints = (getLinearMap mapping l (getLinearMap mapping m (getLinearMap mapping r ints)))
+getLinearMap mapping node@(DINode l r _ _ _) ints = (mapping node) : (getLinearMap mapping l (getLinearMap mapping r ints))
+getLinearMap mapping leaf ints = (mapping leaf) : ints
+
 
 {-setBL :: [Double] -> DNode -> DNode -}
 {-setBL bls node = fst $ setBL' reformattedBLs node where-}
@@ -476,6 +486,7 @@ thmmModelQ numCat s pi [priorZero,alpha,sigma] = (thmmQ numCat pi s priors alpha
 thmmPerBranchModel numCat s pi [priorZero,alpha] = ([thmmPerBranch numCat pi s priors alpha],[fullPi]) where 
                         priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
                         fullPi = makeFullPi priors pi
+thmmPerBranchModel numCat s pi list = error $ "Fail " ++ (show list)
 
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
@@ -503,13 +514,13 @@ thmmPerBranch numCat pi s priors alpha paramList | trace ("thmmpb " ++ (show par
 
 
 loggedFunc :: (Show a) => (a -> Double) -> (a -> Double)
-loggedFunc f = f2 where
+loggedFunc f | trace "LOGGING ON" True = f2 where
                f2 x = ans3 where
                       ans3 | trace (show x) True = ans2
                       ans2 | trace ((show x) ++ " -> " ++ (show ans)) True = ans
                       ans = f x
                     
-maximize method pre maxiter size f params = minimize method pre maxiter size (invert f) params where
+maximize method pre maxiter size f = minimize method pre maxiter size (invert f) 
 
 maximizeDG lower upper method pre maxiter size tol f params = minimizeD method pre maxiter size tol f2 (mygrad lower upper f2) params where
         f2 = invert f
@@ -552,6 +563,93 @@ optParams model t' params priors lower upper cutoff = bestParams where
         --(bestParams,_) = maximizeDG lower upper VectorBFGS2 1E-4 100000 0.1 1E-4 (optParamsFunc tree) params    
         (bestParams,_) = maximize NMSimplex2 1E-4 100000 (map (\i->0.1) params) (optParamsFunc tree) params    
 
+genericOpt opt maxiter size precision lower upper func initialParams = fst $ maximize opt precision maxiter size (boundedFunction (-1E20) lower upper func) initialParams
+simplexOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> [Double]
+simplexOpt l u f p = genericOpt NMSimplex2 100000 (map (\x->0.1) p) 1e-4 l u f p
+
+getFunc1 priors model tree params = logLikelihood $ getFuncT1 priors model tree params
+
+-- only parameters
+getFuncT1 :: [Double] -> ModelF -> DNode -> [Double] -> DNode
+getFuncT1 priors model tree = func where
+        func params = addModelFx tree (model params) priors
+
+-- bsParams then parameters 
+
+getFuncT1A  :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> [Double] -> DNode
+getFuncT1A priors mapping (0,0) model tree = getFuncT1 priors model tree
+getFuncT1A priors mapping numBSParam model tree | trace "getFuncT1A" True = func where
+        func params = addModelFx t2 (model params') priors where
+                (paramsPerBranch,paramCats) = numBSParam
+                t2 = setBLMapped 1 tree getParamF 
+                perBranchParams = take paramCats $ splitLists paramsPerBranch params
+                params' = traceXP "Params "  $ drop (paramsPerBranch * paramCats) params
+                getParamF node = (perBranchParams !! (mapping node))
+
+getParamsT1 params tree = params
+
+-- branchLengths, then other parameters
+getFuncT2 :: [Double] -> ModelF -> DNode -> ([Double] -> DNode)
+getFuncT2 priors model tree | trace "OK1" True = func where
+        func params | trace "OK2" True  = addModelFx t2 (model params2) priors where
+            (t2,params2') = setBLX' 0 (map (\x->[x]) params) tree
+            params2 = map head params2'
+
+getParamsT2 params tree = (map head $ getBL' tree []) ++  params
+
+-- branchLengths, then bsParams, then other params
+getFuncT3 :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> ([Double] -> DNode)
+getFuncT3 priors mapping (paramsPerBranch,paramCats) model tree = func where
+        func params = addModelFx t2 (model params2) priors where
+          indicies  = getLinearMap mapping tree []
+          bsParam = splitLists paramsPerBranch $ drop (length indicies) params
+          branchLengths = map (\(x,y) -> y:(bsParam !! x)) $ zip indicies params 
+          (t2,_)  = setBL' branchLengths tree
+          params2 = drop ((length indicies) + paramsPerBranch * paramCats) params
+
+getParamsT3 = getParamsT2 
+
+splitLists i [] = []
+splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
+                 
+data IterType = Full | BL | Params deriving (Eq, Show)
+
+optBSParamsBL numBSParam mapping = optWithBS' [] 1E-4 numBSParam (Just mapping)
+optParamsBL = optWithBS' [] 1E-4 (0,0) Nothing
+optWithBS' :: [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> (DNode,[Double])
+optWithBS' iterations cutoff numBSParam mapping lower upper priors model tree startParams = trace ((show (take 2 iterations)) ++ "\n" ++ (show startParams) ++ "\n" ++ (show tree)) (bestTree,bestParams) where
+        (bestTree,bestParams) = case iterations of
+                ((x,t):(x',t'):(x'',t''):xs) | (x-x'' < cutoff) && (t''==Full || t==Full) -> (tree,startParams) --stop
+                list@((x,t):(x',t'):xs) | (x-x' < 0.5) && (t /= Full) -> trace "FULLOPT" $  optWithBS' ((lkl,Full):list) cutoff numBSParam mapping lower upper priors model tree (dropBL bestParams') where --full Opt
+                {-list -> trace "FULLOPT" $  optWithBS' ((lkl,Full):list) cutoff numBSParam mapping lower upper priors model tree (dropBL bestParams') where full Opt-}
+                            bestParams' = simplexOpt lower' upper' (loggedFunc $ logLikelihood . getFuncT3 priors (fromJust mapping) numBSParam model tree) startParams'
+                            startParams' = enforceBounds lower' upper' (addBL startParams)
+                            tree' = getFuncT3 priors (fromJust mapping) numBSParam model tree bestParams'
+                            lkl = logLikelihood tree'
+                            myBL = map head $ getBL' tree [] 
+                            numBL = length myBL
+                            addBL p = myBL ++ startParams
+                            dropBL p = drop numBL p
+                            lower' = (replicate numBL $ Just 0.001) ++ lower
+                            upper' = (replicate numBL $ Just 10.0) ++ upper
+                list@((x,BL):xs) -> trace "PARAM OPT" $ optWithBS' ((x,Params):list) cutoff numBSParam mapping lower upper priors model tree' bestParams' where -- Opt Params
+                                bestParams' | trace "OK" True = simplexOpt lower upper (loggedFunc $ logLikelihood . getFuncT1A priors (fromJust mapping) numBSParam model tree) (enforceBounds lower upper startParams)
+                                lkl = logLikelihood tree'
+                                tree' = getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
+                list -> trace "BL OPT" $ optWithBS' ((lkl,BL):list) cutoff numBSParam mapping lower upper priors model tree' startParams where -- Opt Params
+                                tree' = optBLD0 $ addModelFx tree (model params') priors
+                                params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
+                                lkl = logLikelihood $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
+                
+
+enforceBounds l u p = enforce (>) u $ enforce (<) l p where
+        enforce f (x:xs) (y:ys) = (enforce' f x y):(enforce f xs ys)
+        enforce f [] [] = []
+        enforce' f x y = case x of
+                        Nothing -> y
+                        Just x' -> if (f y x') then x' else y
+
+
 optBSParams ::  ModelF -> DNode -> [Double] -> Int -> (DNode -> Int) -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> (DNode,[Double])
 optBSParams | trace "OK" True = optBSParams' (-1E20) 
 
@@ -568,11 +666,21 @@ optBSParams' lastIter model t' params startBS mapping priors lower upper cutoff 
         thisIter | trace ("Best tree " ++ (show bestTree)) True = traceXP "iteration" $  logLikelihood bestTree
         optimal = doNext (thisIter - lastIter)
         doNext improvement | improvement < cutoff = (bestTree,bestParams)
-        doNext improvement = optBSParams' thisIter model bestTree bestParams startBS mapping priors lower upper cutoff
+        doNext improvement | improvement < 1.0 = optBSParams' thisIter model bestTree2 bestParams2 startBS mapping priors lower upper cutoff
+        doNext improvement  = optBSParams' thisIter model bestTree bestParams startBS mapping priors lower upper cutoff 
+        rawFunc testparams = logLikelihood $ addModelFx (fst $ setBLflat 0 tree (drop startBS testparams)) (model $ take startBS testparams) priors
+        rawOptParamsBLFunc :: [Double] -> Double
+        rawOptParamsBLFunc p2 = logLikelihood $ fst $ setBLX' 0 (map (\x->[x]) $ drop (length params) p2) $ (addModelFx (mySetBL bestTree (drop startBS p2)) (model (take startBS p2)) priors)
+        optParamsBLFunc = boundedFunction (-1E20) (lower ++ (repeat $  Just 0.0001)) (upper ++ (repeat $ Just 50.0)) rawOptParamsBLFunc
+        bestALLParams = fst $  maximize NMSimplex2 1E-4 100000 (repeat 0.01) optParamsBLFunc (bestParams ++ (getBL bestTree))
+        bestParams2 = take (length params) bestALLParams
+        bestTree2 = fst $ setBLX' 0 (map (\x->[x]) $ drop (length params) bestALLParams) $ (addModelFx (mySetBL bestTree (drop startBS bestALLParams)) (model (take startBS bestALLParams)) priors)
+        
+                
 
 
         
-optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' False model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     
+{-optParamsAndBL model tree params priors lower upper cutoff = optParamsAndBL' False model tree params priors lower upper cutoff (logLikelihood (addModelFx tree (model params) priors)) []  where                                                                                                                     -}
 
 optParamsAndBL' :: (AddTree t) => Bool -> ModelF -> t -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> Double -> Double -> [Matrix Double] -> (DNode,[Double],[Matrix Double])  
 optParamsAndBL' canEnd model tree params priors lower upper cutoff lastIter path | trace ("OK2" ++ (show lastIter)) $ True = optimal where                                                                                                                                                        
@@ -597,6 +705,8 @@ optParamsAndBL'' model tree params priors lower upper cutoff lastIter path = opt
 --TODO eradicate this function!
 dummyTree :: (AddTree t) => t -> DNode 
 dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
+
+whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
 
 makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> (DNode -> a) 
 makeMapping splitmap t = lookupF where

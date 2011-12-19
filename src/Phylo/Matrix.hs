@@ -63,6 +63,14 @@ eigQ matQ pi = (u,lambda,u') where
                u' = r' <> piRt
                u = piRt' <> r
 
+accEigQ matQ pi = distance where
+                  (u,lambda,u') = eigQ matQ pi
+                  q2' = flatten $ (u <> (diag lambda)) <> u'
+                  q' = flatten matQ
+                  distance = foldVector (+) 0.0 $ mapVector (\a-> a*a) $  zipVectorWith (-) q2' q'
+                  
+
+
 matA matQ pi = ((piRt <> matQ) <> piRt',piRt,piRt') where
                   piRt = diag (mapVector sqrt pi)
                   invsqrt x = 1/(sqrt x) 
