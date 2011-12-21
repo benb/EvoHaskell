@@ -18,6 +18,7 @@ import System.Posix.IO
 import Foreign.C.String (CString,newCString)
 import Phylo.Matrix
 import Stochmap
+import Data.Char (isSpace)
 
 data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
@@ -106,19 +107,24 @@ main = do args <- getArgs
                                                         (optTree,[priorZero,alpha]) = optParamsAndBL model t3 [0.1,0.5] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Nothing] 0.01
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm2 spl):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) where
+                (Just a,Right t,(OptThmm2 spl'):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) where
+                                                        spl = clean spl'
                                                         piF = fromList $ safeScaledAAFrequencies a
                                                         t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             
                                                         startBL = getBL t2
                                                         newBL = map (\x -> x:0.0:[]) startBL
                                                         t3 = fst $ setBLX' 0 newBL t2
-                                                        goodNodes = map (splitBy ',') $ splitBy ' ' spl
+                                                        goodNodes = map (splitBy ',') $ drop 1 $ splitBy ' ' spl
                                                         mapped = makeMapping (allIn goodNodes) t3
                                                         numModels = length $ nub $ whichModels t3 mapped
+                                                        initParams = map read $ splitBy ',' $ head $ splitBy ' ' spl
+                                                        initAlpha = head initParams
+                                                        initSigma = take numModels $ tail initParams
+                                                        initP0 = last initParams
                                                         model | traceShow t3 True = thmmPerBranchModel (cats+1) wagS piF 
                                                         lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001] 
                                                         upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]
-                                                        (optTree,optParams) = optBSParamsBL (1,numModels) mapped lower upper [1.0] model t3 ((replicate numModels 2.0) ++ [0.1,0.5])
+                                                        (optTree,optParams) = optBSParamsBL (1,numModels) mapped lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
                                                         (sigma,[priorZero,alpha]) = splitAt numModels optParams
                                                         lkl = logLikelihood optTree
                                                         {-optBSParamsBL numBSParam mapping = optWithBS' [] 1E-4 numBSParam (Just mapping)-}
@@ -184,3 +190,13 @@ normalise list = map ( / total) list where
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
 optParamsAndBL model tree params priors lower upper cutoff = optWithBS' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
+
+trim = f . f where 
+   f = reverse . dropWhile isSpace
+clean = clean' . trim where
+   clean' (' ':' ':xs) = clean' (' ':xs)
+   clean' (x:xs) = x:(clean' xs)
+   clean' [] = []
+joinWith i (x:x':xs) = (show x) ++ i ++ (joinWith i (x':xs))
+joinWith i (x:xs) = (show x) 
+joinWith i [] = []
