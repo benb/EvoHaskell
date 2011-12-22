@@ -17,6 +17,8 @@ Executable seqcat
         Main-Is: SeqCat.hs
         HS-Source-Dirs: src
 Executable calclkl
+        C-sources: src/Phylo/nlopt_c.c
+        Extensions: ForeignFunctionInterface
         Main-Is: CalcLkl.hs
         HS-Source-Dirs: src
 Executable testopt

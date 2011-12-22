@@ -3,6 +3,7 @@ import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
 import Phylo.Opt
+import Phylo.NLOpt
 import Numeric.LinearAlgebra ((<>),(<.>),scale,mul,constant,diag)
 import Data.Packed.Matrix
 import Data.Packed.Vector
@@ -571,6 +572,10 @@ simplexOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Doubl
 simplexOpt l u f p = genericOpt NMSimplex2 100000 (map (\x->0.1) p) 1e-4 l u f p
 bfgsOpt l u f p = fst $ maximizeDG l u VectorBFGS2 1e-4 100000 0.1 1e-4 f p 
 
+bobyqaOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> IO ([Double],Int)
+bobyqaOpt l u f p = bobyqa 1E-4 p (invert f) l u
+
+
 getFunc1 priors model tree params = logLikelihood $ getFuncT1 priors model tree params
 
 -- only parameters
@@ -603,6 +608,7 @@ getParamsT2 params tree = (map head $ getBL' tree []) ++  params
 
 -- branchLengths, then bsParams, then other params
 getFuncT3 :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> ([Double] -> DNode)
+getFuncT3 priors mapping (0,0) model tree = getFuncT2 priors model tree
 getFuncT3 priors mapping (paramsPerBranch,paramCats) model tree = func where
         func params = addModelFx t2 (model params2) priors where
           indicies  = getLinearMap mapping tree []
@@ -619,7 +625,38 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
 data IterType = Full | BL | Params deriving (Eq, Show)
 
 optBSParamsBL numBSParam mapping = optWithBS' [] 1E-4 numBSParam (Just mapping)
+optBSParamsBLIO numBSParam mapping = optWithBSIO' [] 1E-4 numBSParam (Just mapping)
 optParamsBL = optWithBS' [] 1E-4 (0,0) Nothing
+
+
+optWithBSIO' :: [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> IO (DNode,[Double])
+optWithBSIO' iterations cutoff numBSParam mapping lower upper priors model tree startParams = do 
+     ans <- case iterations of
+                ((x,t):(x',t'):(x'',t''):xs) | (x-x'' < cutoff) && (t''==Full || t==Full) -> return (tree,startParams) --stop
+                list@((x,t):(x',t'):_:_:xs) | (x-x' < 0.5) && (t /= Full) -> do 
+                           let myBL = map head $ getBL' tree [] 
+                           let numBL = length myBL
+                           let addBL p = myBL ++ startParams
+                           let dropBL p = drop numBL p
+                           let lower' = (replicate numBL $ Just 0.001) ++ lower
+                           let upper' = (replicate numBL $ Just 10.0) ++ upper
+                           let startParams' = enforceBounds lower' upper' (addBL startParams)
+                           (bestParams',err) <- bobyqaOpt lower' upper' (loggedFunc $ logLikelihood . getFuncT3 priors (fromJust mapping) numBSParam model tree) startParams'
+                           --let (bestParams',err) = output
+                           let tree' = getFuncT3 priors (fromJust mapping) numBSParam model tree bestParams'
+                           let lkl = logLikelihood tree'
+                           optWithBSIO' ((lkl,Full):list) cutoff numBSParam mapping lower upper priors model tree (dropBL bestParams') where --full Opt
+                list@((x,BL):xs) -> do 
+                           (bestParams',err) <- bobyqaOpt lower upper (loggedFunc $ logLikelihood . getFuncT1A priors (fromJust mapping) numBSParam model tree) (enforceBounds lower upper startParams)
+                           let tree' = getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
+                           let lkl = logLikelihood tree'
+                           optWithBSIO' ((lkl,Params):list) cutoff numBSParam mapping lower upper priors model tree' bestParams' where -- Opt Params
+                list -> trace "BL OPT" $ optWithBSIO' ((lkl,BL):list) cutoff numBSParam mapping lower upper priors model tree' startParams where -- Opt Params
+                                tree' = optBLDFull0 $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams
+                                params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
+                                lkl = logLikelihood $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
+     return ans
+ 
 optWithBS' :: [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> (DNode,[Double])
 optWithBS' iterations cutoff numBSParam mapping lower upper priors model tree startParams = trace ((show (take 10 iterations)) ++ "\n" ++ (show startParams) ++ "\n" ++ (show tree)) (bestTree,bestParams) where
         (bestTree,bestParams) = case iterations of

@@ -52,22 +52,25 @@ main = do args <- getArgs
           let (cats,remainOpts') = case remainOpts of 
                 (NumCats n):rem -> (read n,rem)
                 rem -> (4,rem)
-          case (aln,tree,remainOpts') of 
-                (Just a,Right t,[])-> putStrLn $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,(Alpha val):[])-> putStrLn $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
-                (Just a,Right t,(OptAlpha):[])-> putStrLn $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
+          putStrLn "OK" 
+          output <- case (aln,tree,remainOpts') of 
+                (Just a,Right t,[])-> return $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
+                (Just a,Right t,(Alpha val):[])-> return $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
+                (Just a,Right t,(OptAlpha):[])-> return $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                         t2 = structDataN 1 AminoAcid (pAlignment a) t
                                                         piF = fromList $ safeScaledAAFrequencies a
                                                         model = gammaModel cats wagS piF
                                                         (optTree,[logalpha]) = optParamsAndBL model t2 [0.5] [0.25,0.25,0.25,0.25] [Just 0.001] [Nothing] 0.01
                                                         alpha = exp logalpha
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) where
-                                                        t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                                                                                       
-                                                        piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
-                                                        model = thmmModel (cats+1) wagS piF
-                                                        (optTree,[priorZero,alpha,sigma]) = optParamsAndBL model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Nothing,Nothing] 0.01
-                                                        lkl = trace (show optTree) $ logLikelihood optTree
+                (Just a,Right t,(OptThmm):[])-> do 
+                        let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                                                                                       
+                        let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
+                        putStrLn "OK"
+                        let model = thmmModel (cats+1) wagS piF
+                        (optTree,[priorZero,alpha,sigma]) <- optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        let lkl = logLikelihood optTree
+                        return $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                 (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
                                                                 let interintra = head $ drop 3 $ words params
                                                                 let pAln = pAlignment a
@@ -96,8 +99,9 @@ main = do args <- getArgs
                                                                 putStr $ splitsStr $ toPBESplits pBEStr
                                                                 --putStrLn $ "OK " ++ (show $ accEigQ (qMat) ((snd model)!!0))
                                                                 calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
+                                                                return ""
                                                                 {-c_test chandle $ fromIntegral 10-}
-                (Just a,Right t,(OptThmmP):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
+                (Just a,Right t,(OptThmmP):[])-> return $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                         piF = fromList $ safeScaledAAFrequencies a
                                                         t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                                
                                                         startBL = getBL t2
@@ -107,26 +111,27 @@ main = do args <- getArgs
                                                         (optTree,[priorZero,alpha]) = optParamsAndBL model t3 [0.1,0.5] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Nothing] 0.01
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm2 spl'):[])-> putStrLn $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) where
-                                                        spl = clean spl'
-                                                        piF = fromList $ safeScaledAAFrequencies a
-                                                        t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             
-                                                        startBL = getBL t2
-                                                        newBL = map (\x -> x:0.0:[]) startBL
-                                                        t3 = fst $ setBLX' 0 newBL t2
-                                                        goodNodes = map (splitBy ',') $ drop 1 $ splitBy ' ' spl
-                                                        mapped = makeMapping (allIn goodNodes) t3
-                                                        numModels = length $ nub $ whichModels t3 mapped
-                                                        initParams = map read $ splitBy ',' $ head $ splitBy ' ' spl
-                                                        initAlpha = head initParams
-                                                        initSigma = take numModels $ tail initParams
-                                                        initP0 = last initParams
-                                                        model | traceShow t3 True = thmmPerBranchModel (cats+1) wagS piF 
-                                                        lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001] 
-                                                        upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]
-                                                        (optTree,optParams) = optBSParamsBL (1,numModels) mapped lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
-                                                        (sigma,[priorZero,alpha]) = splitAt numModels optParams
-                                                        lkl = logLikelihood optTree
+                (Just a,Right t,(OptThmm2 spl'):[])-> do (optTree,optParams) <- optBSParamsBLIO (1,numModels) mapped lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
+                                                         let (sigma,[priorZero,alpha]) = splitAt numModels optParams
+                                                         let lkl = logLikelihood optTree
+                                                         putStrLn ("SIGMA " ++ (show sigma))
+                                                         return $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree)  where
+                                                                spl = clean spl'
+                                                                piF = fromList $ safeScaledAAFrequencies a
+                                                                t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             
+                                                                startBL = getBL t2
+                                                                newBL = map (\x -> x:0.0:[]) startBL
+                                                                t3 = fst $ setBLX' 0 newBL t2
+                                                                goodNodes = map (splitBy ',') $ drop 1 $ splitBy ' ' spl
+                                                                mapped = makeMapping (allIn goodNodes) t3
+                                                                numModels = length $ nub $ whichModels t3 mapped
+                                                                initParams = map read $ splitBy ',' $ head $ splitBy ' ' spl
+                                                                initAlpha = head initParams
+                                                                initSigma = take numModels $ tail initParams
+                                                                initP0 = last initParams
+                                                                model | traceShow t3 True = thmmPerBranchModel (cats+1) wagS piF 
+                                                                lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001] 
+                                                                upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]
                                                         {-optBSParamsBL numBSParam mapping = optWithBS' [] 1E-4 numBSParam (Just mapping)-}
                                                         {-optParamsBL = optWithBS' [] 1E-4 (0,0) Nothing-}
                                                         {-optWithBS' :: [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> (DNode,[Double])-}
@@ -140,7 +145,7 @@ main = do args <- getArgs
                                                         {-t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN (cats+1) AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel (cats+1) cpRevS cpRevPi [priorZero,alpha]) [1.0]-}
                                                         {-goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] -}
                                                         {-mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2-}
-                (a,Right t,(OptSim0 params):[]) -> putStrLn $ concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen (floor length) t2 where
+                (a,Right t,(OptSim0 params):[]) -> return $ concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen (floor length) t2 where
                                                         alpha:sigma0:sigma1:priorZero:length:[] = map (read) $take 5 $ words params
                                                         goodNodes = splitBy ',' $ head $ drop 5 $ words params 
                                                         piF = case a of 
@@ -152,7 +157,7 @@ main = do args <- getArgs
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
                 (Just a,Right t,OptSim2 params:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
                                                          (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
-                                                         putStrLn $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
+                                                         return $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
                                                              compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen 349 t3 where
                                                                 alpha:sigma0:sigma1:priorZero:[] = map (read) $ words params
                                                                 piF = fromList $ safeScaledAAFrequencies a
@@ -165,6 +170,7 @@ main = do args <- getArgs
                                                                 mappedModels = makeMapping (\(x,y) -> if (tfFunc x y) then model1 else model0) t2
                                                                 t3 = restructDataMapped t2 mappedModels [1.0] pi_0
                 (_,_,_) -> error "Can't parse something"
+          putStrLn output
 
 allIn sets (l,r) = case (findIndex (==True) $ map (allIn' l r) sets) of
                         Just a -> a
@@ -190,6 +196,7 @@ normalise list = map ( / total) list where
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
 optParamsAndBL model tree params priors lower upper cutoff = optWithBS' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
+optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
 
 trim = f . f where 
    f = reverse . dropWhile isSpace
@@ -198,5 +205,5 @@ clean = clean' . trim where
    clean' (x:xs) = x:(clean' xs)
    clean' [] = []
 joinWith i (x:x':xs) = (show x) ++ i ++ (joinWith i (x':xs))
-joinWith i (x:xs) = (show x) 
+joinWith i [x] = (show x) 
 joinWith i [] = []
