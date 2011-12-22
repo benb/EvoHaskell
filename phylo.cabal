@@ -11,13 +11,23 @@ Build-Type:     Simple
 --Executable homdist
 --        Main-Is: HomDist.hs
 --       HS-Source-Dirs: src
+
+
 Executable seqcat
         Main-Is: SeqCat.hs
         HS-Source-Dirs: src
 Executable calclkl
         Main-Is: CalcLkl.hs
         HS-Source-Dirs: src
-library
-        Exposed-Modules: Phylo.Opt, Phylo.Data, Phylo.Matrix, Phylo.Likelihood
+Executable testopt
+        C-sources: src/Phylo/nlopt_c.c
+        Main-Is: testOpt.hs
         HS-Source-Dirs: src
-        Build-Depends: stochmap >= 0.1, unix>=2.4.0.0, random>=1.0, phytree>=0.4.2, json>=0.4, parallel>=3.1.0.1, hmatrix-gsl-stats>=0.1.2.9, statistics>=0.8.0.5, hmatrix >= 0.11.0.4, bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
+library
+        C-sources: src/Phylo/nlopt_c.c
+        Extensions: ForeignFunctionInterface
+        Exposed-Modules: Phylo.Opt, Phylo.Data, Phylo.Matrix, Phylo.Likelihood, Phylo.NLOpt
+        HS-Source-Dirs: src
+        Includes: nlopt.h
+        Build-Depends: base >= 3,stochmap >= 0.1, unix>=2.4.0.0, random>=1.0, phytree>=0.4.2, json>=0.4, parallel>=3.1.0.1, hmatrix-gsl-stats>=0.1.2.9, statistics>=0.8.0.5, hmatrix >= 0.11.0.4, bytestring >= 0.9.0.0, parsec >= 2.1.0 && < 3.0.0, mtl >= 1.1.0.2, hashmap >= 1.1.0, QuickCheck>=2.4.0.1, containers >= 0.3.0.0, base >= 3
+        Build-tools:         hsc2hs
