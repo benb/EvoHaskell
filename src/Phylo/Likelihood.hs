@@ -574,6 +574,7 @@ bfgsOpt l u f p = fst $ maximizeDG l u VectorBFGS2 1e-4 100000 0.1 1e-4 f p
 
 bobyqaOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> IO ([Double],Int)
 bobyqaOpt l u f p = bobyqa 1E-4 p (invert f) l u
+cobylaOpt l u f p = cobyla 1E-4 p (invert f) l u
 
 
 getFunc1 priors model tree params = logLikelihood $ getFuncT1 priors model tree params

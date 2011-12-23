@@ -19,6 +19,9 @@ int call_nlopt(nlopt_algorithm alg, double xtol, double *params, unsigned np, do
 int opt_bobyqa(double xtol, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
         return call_nlopt(NLOPT_LN_BOBYQA,xtol,params,np,func,lower,upper);
 }
+int opt_cobyla(double xtol, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_COBYLA,xtol,params,np,func,lower,upper);
+}
 
 /*int main(int argc, char* argv[]){*/
         /*double lb[2] = { -5.12, -5 }; [> lower bounds <]*/
