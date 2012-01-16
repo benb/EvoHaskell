@@ -52,11 +52,10 @@ main = do args <- getArgs
           let (cats,remainOpts') = case remainOpts of 
                 (NumCats n):rem -> (read n,rem)
                 rem -> (4,rem)
-          putStrLn "OK" 
           output <- case (aln,tree,remainOpts') of 
-                (Just a,Right t,[])-> return $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,(Alpha val):[])-> return $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
-                (Just a,Right t,(OptAlpha):[])-> return $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
+                (Just a,Right t,[])-> return $ Just $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
+                (Just a,Right t,(Alpha val):[])-> return $ Just $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
+                (Just a,Right t,(OptAlpha):[])-> return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                         t2 = structDataN 1 AminoAcid (pAlignment a) t
                                                         piF = fromList $ safeScaledAAFrequencies a
                                                         model = gammaModel cats wagS piF
@@ -70,7 +69,7 @@ main = do args <- getArgs
                         let model = thmmModel (cats+1) wagS piF
                         (optTree,[priorZero,alpha,sigma]) <- optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
                         let lkl = logLikelihood optTree
-                        return $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                        return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                 (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
                                                                 let interintra = head $ drop 3 $ words params
                                                                 let pAln = pAlignment a
@@ -99,9 +98,9 @@ main = do args <- getArgs
                                                                 putStr $ splitsStr $ toPBESplits pBEStr
                                                                 --putStrLn $ "OK " ++ (show $ accEigQ (qMat) ((snd model)!!0))
                                                                 calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
-                                                                return ""
+                                                                return Nothing
                                                                 {-c_test chandle $ fromIntegral 10-}
-                (Just a,Right t,(OptThmmP):[])-> return $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
+                (Just a,Right t,(OptThmmP):[])-> return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                         piF = fromList $ safeScaledAAFrequencies a
                                                         t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                                
                                                         startBL = getBL t2
@@ -115,7 +114,7 @@ main = do args <- getArgs
                                                          let (sigma,[priorZero,alpha]) = splitAt numModels optParams
                                                          let lkl = logLikelihood optTree
                                                          putStrLn ("SIGMA " ++ (show sigma))
-                                                         return $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree)  where
+                                                         return $ Just $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree)  where
                                                                 spl = clean spl'
                                                                 piF = fromList $ safeScaledAAFrequencies a
                                                                 t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             
@@ -145,7 +144,7 @@ main = do args <- getArgs
                                                         {-t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN (cats+1) AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel (cats+1) cpRevS cpRevPi [priorZero,alpha]) [1.0]-}
                                                         {-goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] -}
                                                         {-mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2-}
-                (a,Right t,(OptSim0 params):[]) -> return $ concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen (floor length) t2 where
+                (a,Right t,(OptSim0 params):[]) -> return $ Just $ concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen (floor length) t2 where
                                                         alpha:sigma0:sigma1:priorZero:length:[] = map (read) $take 5 $ words params
                                                         goodNodes = splitBy ',' $ head $ drop 5 $ words params 
                                                         piF = case a of 
@@ -157,7 +156,7 @@ main = do args <- getArgs
                                                         mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2
                 (Just a,Right t,OptSim2 params:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
                                                          (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
-                                                         return $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
+                                                         return $ Just $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
                                                              compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen 349 t3 where
                                                                 alpha:sigma0:sigma1:priorZero:[] = map (read) $ words params
                                                                 piF = fromList $ safeScaledAAFrequencies a
@@ -170,7 +169,9 @@ main = do args <- getArgs
                                                                 mappedModels = makeMapping (\(x,y) -> if (tfFunc x y) then model1 else model0) t2
                                                                 t3 = restructDataMapped t2 mappedModels [1.0] pi_0
                 (_,_,_) -> error "Can't parse something"
-          putStrLn output
+          case output of
+               Just str -> putStrLn str
+               Nothing -> return ()
 
 allIn sets (l,r) = case (findIndex (==True) $ map (allIn' l r) sets) of
                         Just a -> a
