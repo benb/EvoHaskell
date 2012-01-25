@@ -178,8 +178,9 @@ allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) set
                                         Just a -> a
                                         Nothing -> other
                                  where other = length sets
-allIn = allInGeneric allIn'
+allIn = allInGeneric allInDynamic'
 allInNoRoot = allInGeneric allInNoRoot'
+
 
 allIn' :: [String] -> [String] -> [String] -> Bool
 allIn' l r set = (l \\ set == [] || r \\ set == []) --we want l or r to be fully contained within 'set'
@@ -187,6 +188,11 @@ allIn' l r set = (l \\ set == [] || r \\ set == []) --we want l or r to be fully
 allInNoRoot' :: [String] -> [String] -> [String] -> Bool
 allInNoRoot' l r set = ((l \\ set == []) && (set \\ l /= [])) || ((r \\ set == []) &&  (set \\ r /= [])) --we want l or r to be fully contained with in 'set', but not the same as 'set'
                         
+--if first symbol is '@' then use noRoot version
+allInDynamic' :: [String] -> [String] -> [String] -> Bool
+allInDynamic' l r ("@":set) = allInNoRoot' l r set
+allInDynamic' l r set = allIn' l r set
+
 
 splitBy delim s = ans where
   (token,rest) = span (/=delim) s
