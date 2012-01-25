@@ -625,8 +625,8 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
                  
 data IterType = Full | BL | Params deriving (Eq, Show)
 
-optBSParamsBL numBSParam mapping = optWithBS' [] 1E-2 numBSParam (Just mapping)
-optBSParamsBLIO numBSParam mapping = optWithBSIO' [] 1E-2 numBSParam (Just mapping)
+optBSParamsBL numBSParam mapping = optWithBS' [] 1E-4 numBSParam (Just mapping)
+optBSParamsBLIO numBSParam mapping = optWithBSIO' [] 1E-4 numBSParam (Just mapping)
 optParamsBL = optWithBS' [] 1E-4 (0,0) Nothing
 
 
