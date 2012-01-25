@@ -173,12 +173,20 @@ main = do args <- getArgs
                Just str -> putStrLn str
                Nothing -> return ()
 
-allIn sets (l,r) = case (findIndex (==True) $ map (allIn' l r) sets) of
-                        Just a -> a
-                        Nothing -> other 
-                   where other = length sets
+
+allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of
+                                        Just a -> a
+                                        Nothing -> other
+                                 where other = length sets
+allIn = allInGeneric allIn'
+allInNoRoot = allInGeneric allInNoRoot'
+
+allIn' :: [String] -> [String] -> [String] -> Bool
+allIn' l r set = (l \\ set == [] || r \\ set == []) --we want l or r to be fully contained within 'set'
+
+allInNoRoot' :: [String] -> [String] -> [String] -> Bool
+allInNoRoot' l r set = ((l \\ set == []) && (set \\ l /= [])) || ((r \\ set == []) &&  (set \\ r /= [])) --we want l or r to be fully contained with in 'set', but not the same as 'set'
                         
-allIn' l r set = (l \\ set == [] || r \\ set == [])
 
 splitBy delim s = ans where
   (token,rest) = span (/=delim) s
