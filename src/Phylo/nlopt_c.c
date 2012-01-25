@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "nlopt_c.h"
 
-int call_nlopt(nlopt_algorithm alg, double xtol, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+int call_nlopt(nlopt_algorithm alg, double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
         nlopt_opt opt;
         double minf; /* the minimum objective value, upon return */
         int retval;
@@ -11,16 +11,17 @@ int call_nlopt(nlopt_algorithm alg, double xtol, double *params, unsigned np, do
         nlopt_set_lower_bounds(opt,lower);
         nlopt_set_upper_bounds(opt,upper);
         nlopt_set_min_objective(opt,func,NULL);
-        nlopt_set_xtol_rel(opt,xtol);
+        nlopt_set_xtol_abs1(opt,xtol);
+        nlopt_set_initial_step(opt,step_size);
         retval = nlopt_optimize(opt, params, &minf) ;
         nlopt_destroy(opt);
         return retval;
 }
-int opt_bobyqa(double xtol, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
-        return call_nlopt(NLOPT_LN_BOBYQA,xtol,params,np,func,lower,upper);
+int opt_bobyqa(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_BOBYQA,xtol,step_size,params,np,func,lower,upper);
 }
-int opt_cobyla(double xtol, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
-        return call_nlopt(NLOPT_LN_COBYLA,xtol,params,np,func,lower,upper);
+int opt_cobyla(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_COBYLA,xtol,step_size,params,np,func,lower,upper);
 }
 
 /*int main(int argc, char* argv[]){*/

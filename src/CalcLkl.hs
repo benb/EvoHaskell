@@ -110,7 +110,7 @@ main = do args <- getArgs
                                                         (optTree,[priorZero,alpha]) = optParamsAndBL model t3 [0.1,0.5] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Nothing] 0.01
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm2 spl'):[])-> do (optTree,optParams) <- optBSParamsBLIO (1,numModels) mapped lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
+                (Just a,Right t,(OptThmm2 spl'):[])-> do (optTree,optParams) <- optBSParamsBLIO (1,numModels) mapped (map (\x->0.01) lower) lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
                                                          let (sigma,[priorZero,alpha]) = splitAt numModels optParams
                                                          let lkl = logLikelihood optTree
                                                          putStrLn ("SIGMA " ++ (show sigma))
@@ -211,7 +211,7 @@ normalise list = map ( / total) list where
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
 optParamsAndBL model tree params priors lower upper cutoff = optWithBS' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
-optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
+optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing (map (\x->0.01) lower) lower upper priors model (dummyTree tree) params                                                            
 
 trim = f . f where 
    f = reverse . dropWhile isSpace
