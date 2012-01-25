@@ -28,5 +28,6 @@ nlopt met xtol params f lower upper = do lower' <- newArray $ map (realToFrac . 
                                          startP <- newArray $ map (realToFrac) params
                                          let retCode = fromIntegral $ met (realToFrac xtol) startP (fromIntegral np) f'' lower' upper' 
                                          ans <- seq retCode $ fmap (map realToFrac) $ peekArray np startP
+                                         freeHaskellFunPtr f''
                                          return (ans,retCode)
 
