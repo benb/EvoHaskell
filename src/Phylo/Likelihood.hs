@@ -259,7 +259,7 @@ instance AddTree NNode where
                        ans = addModelNNode w x y z
                        ans2 = seq (getPL ans) ans
 instance AddTree DNode where
-        addModel w x y z | trace "ADDMODELFX" True  = ans2 where 
+        addModel w x y z = ans2 where 
                            ans = restructData w x y z
                            ans2 = seq (getPL ans) ans
 
@@ -366,8 +366,8 @@ setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newl
 optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
                         (DTree l _ _ _ _ _ _ ) = tree
                         best = case l of 
-                                (DINode _ _ [param] _ _) -> (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
-                                (DLeaf _ [param] _ _ _ _) -> (goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
+                                (DINode _ _ [param] _ _) -> (safeGoldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
+                                (DLeaf _ [param] _ _ _ _) -> (safeGoldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
                                 (DLeaf _ params _ _ _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
                                 (DINode _ _ params _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
 
@@ -376,7 +376,7 @@ getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 
 optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
                                 startBL = getLeftBL tree
-                                b = goldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
+                                b = safeGoldenSection 0.01 0.001 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
                                 best = replace val [b] startBL
 
 
@@ -588,7 +588,7 @@ getFuncT1 priors model tree = func where
 
 getFuncT1A  :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> [Double] -> DNode
 getFuncT1A priors mapping (0,0) model tree = getFuncT1 priors model tree
-getFuncT1A priors mapping numBSParam model tree | trace "getFuncT1A" True = func where
+getFuncT1A priors mapping numBSParam model tree True = func where
         func params = addModelFx t2 (model params') priors where
                 (paramsPerBranch,paramCats) = numBSParam
                 t2 = setBLMapped 1 tree getParamF 
