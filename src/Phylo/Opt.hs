@@ -14,7 +14,7 @@ safeGoldenSection tol x1 x3 f = ans where
                                 f3 = f x3
                                 ans = if (abs(f3-f2)<tol*10)
                                       then
-                                          safeGoldenSection tol x1 (x3/2) f
+                                          trace ("rescaling golden section to " ++ (show x1) ++ " " ++ (show $ x3/2)) $ safeGoldenSection tol x1 (x3/2) f
                                       else 
                                           goldenSection' tol x1 x2 x3 f1 f2 f3 f
                                           

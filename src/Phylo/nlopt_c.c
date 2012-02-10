@@ -7,6 +7,7 @@ int call_nlopt(nlopt_algorithm alg, double xtol, double *step_size, double *para
         nlopt_opt opt;
         double minf; /* the minimum objective value, upon return */
         int retval;
+        int i;
         opt = nlopt_create(alg,np);
         nlopt_set_lower_bounds(opt,lower);
         nlopt_set_upper_bounds(opt,upper);

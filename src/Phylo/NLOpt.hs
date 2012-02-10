@@ -8,6 +8,7 @@ import Foreign.C.Types
 import Foreign.Ptr (Ptr, FunPtr, freeHaskellFunPtr)
 import Control.Monad
 import Debug.Trace
+import Control.Applicative
 
 foreign import ccall safe "nlopt_c opt_bobyqa" 
         bobyqa_ :: CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt
@@ -21,13 +22,15 @@ nlopt :: (CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Pt
 
 bobyqa = nlopt bobyqa_
 cobyla = nlopt cobyla_
+traceX a x = trace (show a ++ (show x)) x
+traceXm a = liftM (traceX a)
 nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 
                                                   stepSize' <- newArray $ map realToFrac stepSize
                                                   let np = trace ("Start params " ++ (show params) ++ " np " ++ (show (length params))) $ length params
                                                   let f' a b c d = fmap realToFrac $ fmap f (fmap (map realToFrac) $ peekArray np b)
                                                   f'' <- wrap f'
-                                                  startP <- newArray $ map (realToFrac) params
+                                                  startP <- newArray $ traceX ("realToFrac") $ map (realToFrac) params
                                                   let retCode = fromIntegral $ met (realToFrac xtol) stepSize' startP (fromIntegral np) f'' lower' upper' 
                                                   ans <- seq retCode $ fmap (map realToFrac) $ peekArray np startP
                                                   freeHaskellFunPtr f''
