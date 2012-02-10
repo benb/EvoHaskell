@@ -62,9 +62,9 @@ mapBack :: PatternAlignment -> [Int]
 mapBack (PatternAlignment _ _ columns patterns _) = map (\x->fromJust $ findIndex (==x) patterns) columns
 
 calcPL :: DNode -> DNode -> [Double] -> [BranchModel] -> [Matrix Double]
-calcPL left right dist model = allPLC (map (\x-> x dist) model) $ allCombine (getPL left) (getPL right) 
+calcPL left right dist model = allPLC (map (\x-> fst $ x dist) model) $ allCombine (getPL left) (getPL right) 
 calcLeafPL :: Matrix Double -> [Double] -> [BranchModel] -> [Matrix Double]
-calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (map (\x -> x dist) model)
+calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (map (\x -> fst $ x dist) model)
 calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL left) (getPL right)
 
 {-- gives [[[Matrix Double]]] where [branch [proc [left/right Matrix]]] --}
@@ -184,15 +184,18 @@ aaPartial classes x | isGapChar x = buildVector (20*classes) (\i->1.0)
 
 
 quickGamma' numCat tree priors pi s aln alpha = logLikelihood dataTree  where
-                                                dataTree = structData 1 AminoAcid pAln (map (\r->scaledpT r eigenS) rates) transpats tree priors (repeat pi)
+                                                dataTree = structData 1 AminoAcid pAln branchModel transpats tree priors (repeat pi)
+                                                branchModel = (map (\r->(\x->(scaledpT r eigenS x,mat))) rates) 
                                                 rates = gamma numCat alpha
                                                 transpats = transpose $ patterns pAln
-                                                eigenS = quickEigen pi s
+                                                (eigenS,mat) = quickEigen' pi s
                                                 pAln = pAlignment aln
                                                 patcounts = counts pAln
                                                 
                                                         
 quickEigen pi s = eigQ (normQ (makeQ s pi) pi) pi
+quickEigen' pi s = (eigQ mat pi,mat) where
+                        mat = normQ (makeQ s pi) pi
 
 standardpT = scaledpT 1.0
 scaledpT scale eigenS params = pT eigenS $ (head params) * scale
@@ -227,10 +230,11 @@ gamma numCat shape | shape > 50000.0 = gamma numCat 50000.0 --work around gsl co
                         gammaInvCDF p = (density_1p ChiSq UppInv (2.0*alpha) (1.0-p)) / (2.0*beta) -- (UppInv mysteriously has more stable convergence)
 
 
-type BranchModel = [Double] -> Matrix Double
+type BranchModel = [Double] -> (Matrix Double,Matrix Double) -- first matrix exponentiated for BL, second not
+
 type OptModel = DNode -> [Double] -> Double
-data DNode = DLeaf {dName :: String,dDistance :: [Double],sequence::String,tipLikelihoods::Matrix Double,p::([[Double] -> Matrix Double]),partialLikelihoods::[Matrix Double]} |
-        DINode DNode DNode [Double] ([[Double] -> Matrix Double]) [Matrix Double] | 
+data DNode = DLeaf {dName :: String,dDistance :: [Double],sequence::String,tipLikelihoods::Matrix Double,p::[BranchModel],partialLikelihoods::[Matrix Double]} |
+        DINode DNode DNode [Double] [BranchModel] [Matrix Double] | 
         DTree DNode DNode DNode [Matrix Double] [Int] [Double] [(Vector Double)]
 
 data NNode = NLeaf String [Double] String (Matrix Double) | NINode NNode NNode [Double] | NTree NNode NNode NNode [Int]
@@ -476,14 +480,15 @@ qdLkl numCat priors dataType aln tree modelF params = logLikelihood $ addModelFx
 type ModelF = [Double] -> ([BranchModel],[Vector Double])
 basicModel :: Matrix Double -> Vector Double -> ModelF
 basicModel s pi _ = ([model],[pi]) where
-                    model = standardpT $ quickEigen pi s
+                    model = (\x -> (standardpT e x,m))
+                    (e,m) = quickEigen' pi s
 
 quickLkl aln tree pi s = qdLkl 1 [1.0] AminoAcid aln tree (basicModel s pi) []
 quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid aln tree (gammaModel numCat s pi) [alpha]
 
 gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
-                                models  = map (\r -> scaledpT r eigenS) $ gamma numCat alpha
-                                eigenS  = quickEigen pi s
+                                models = map (\r -> (\x ->(scaledpT r eigenS x,mat))) $ gamma numCat alpha
+                                (eigenS,mat) = quickEigen' pi s
 
 thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
                         priors =  (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
@@ -503,7 +508,8 @@ thmmPerBranchModel numCat s pi list = error $ "Fail " ++ (show list)
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
 thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> BranchModel
-thmm numCat pi s priors alpha sigma = standardpT $ eigQ (thmmQ numCat pi s priors alpha sigma) fullPi where
+thmm numCat pi s priors alpha sigma = (\x->(standardpT (eigQ (thmmQ numCat pi s priors alpha sigma) fullPi) x,mat)) where
+                                               mat = thmmQ numCat pi s priors alpha sigma
                                                fullPi = makeFullPi priors pi
 
 thmmQ :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
@@ -518,7 +524,7 @@ thmmQ numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where
 
 
 
-thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> Matrix Double
+thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> (Matrix Double,Matrix Double)
 thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s priors alpha sigma [branchLength]
 thmmPerBranch numCat pi s priors alpha paramList | trace ("thmmpb " ++ (show paramList)) False = undefined
 
@@ -741,7 +747,7 @@ makeSimulatedTree' Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimpleme
 
 makeSimulatedTree' AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist _ _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
         myMats :: [Matrix Double]
-        myMats = map (\x -> x dist) modelList
+        myMats = map (\x -> fst $x dist) modelList
         myVectors :: [[[Double]]]
         myVectors = map toLists $ map (myMats!!) models
         myVectors' = (map (\(vec,base) -> vec!!base) $ zip myVectors topSeq)
@@ -751,7 +757,7 @@ makeSimulatedTree' AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist
 
 makeSimulatedTree' seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
         myMats :: [Matrix Double]
-        myMats = map (\x -> x dist) modelList
+        myMats = map (\x -> fst$ x dist) modelList
         myVectors :: [[[Double]]]
         myVectors = map toLists $ map (myMats!!) models
         (r0:leftR:rightR:_) = genList stdGen 
@@ -782,3 +788,14 @@ simulateSequences seqDataType hiddenClasses stdGen length root = quickListAlignm
         names = map dName leaves
         seqs = map Phylo.Likelihood.sequence leaves
 
+
+annotateTreeWithNumberSwitches (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitches
+annotateTreeWithNumberSwitches' priors (DINode l r (bl:sigma:[]) models mats) = DINode l r [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL priors models [bl,sigma]
+
+annotateTreeWithNumberSwitches' priors (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL priors models [bl,sigma]
+
+calcSwitchBL priors models (bl:sigma:[]) = 1.0
+                                                                                
