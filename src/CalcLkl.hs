@@ -20,7 +20,8 @@ import Phylo.Matrix
 import Stochmap
 import Data.Char (isSpace)
 
-data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String
+data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
+        deriving (Show,Eq,Ord)
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
             Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
@@ -31,6 +32,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment"
             Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
             Option ['n'] ["opt-thmmplus"] (NoArg OptThmmP) "Optimise THMM Model",
             Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
+            Option [] ["noopt"] (NoArg NoOpt) "Don't optimize",
             Option [] ["sim0"] (ReqArg OptSim0 "PARAMS") "Simulate WAG",
             Option [] ["sim1"] (NoArg OptSim1) "Simulation 1",
             Option [] ["sim2"] (ReqArg OptSim2 "PARAMS") "Simulation 2"]
@@ -52,7 +54,7 @@ main = do args <- getArgs
           let (cats,remainOpts') = case remainOpts of 
                 (NumCats n):rem -> (read n,rem)
                 rem -> (4,rem)
-          output <- case (aln,tree,remainOpts') of 
+          output <- case (aln,tree,(sort remainOpts')) of 
                 (Just a,Right t,[])-> return $ Just $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
                 (Just a,Right t,(Alpha val):[])-> return $ Just $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
                 (Just a,Right t,(OptAlpha):[])-> return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
@@ -67,7 +69,8 @@ main = do args <- getArgs
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
                         putStrLn "OK"
                         let model = thmmModel (cats+1) wagS piF
-                        (optTree,[priorZero,alpha,sigma]) <- optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        (optTree',[priorZero,alpha,sigma]) <- optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        let optTree = annotateTreeWithNumberSwitchesSigma sigma optTree'
                         let lkl = logLikelihood optTree
                         return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                 (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
@@ -110,11 +113,46 @@ main = do args <- getArgs
                                                         (optTree,[priorZero,alpha]) = optParamsAndBL model t3 [0.1,0.5] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Nothing] 0.01
                                                         bls = getBL t3
                                                         lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm2 spl'):[])-> do (optTree,optParams) <- optBSParamsBLIO (1,numModels) mapped (map (\x->0.01) lower) lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
+                (Just a,Right t,(OptThmm2 spl'):xs)-> do (optTree',optParams) <- case xs of 
+                                                                list | NoOpt `elem` list -> return (t4,p) where
+                                                                                              p = (initSigma ++ [initP0,initAlpha])
+                                                                                              t4 = getFuncT1A [1.0] mapped (1,numModels) model t3 p where
+                                                                _ -> optBSParamsBLIO (1,numModels) mapped (map (\x->0.01) lower) lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
+                                                         let optTree = annotateTreeWithNumberSwitches optTree'
+                                                         print optTree
                                                          let (sigma,[priorZero,alpha]) = splitAt numModels optParams
                                                          let lkl = logLikelihood optTree
                                                          putStrLn ("SIGMA " ++ (show sigma))
-                                                         return $ Just $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree)  where
+                                                         --
+                                                         let (nSite,nCols,multiplicites) = getAlnData (pAlignment a) where
+                                                                    getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
+                                                         let nState = (cats+1)*20
+                                                         let pi_i = map toList $ getpi optTree' where
+                                                                        getpi (DTree _ _ _ _ _ _ pi) = pi
+                                                         let sitelikes = [likelihoods optTree']
+                                                         let nProc = 1 {-- fixme --}
+                                                         let pBEStr = getPartialBranchEnds optTree'
+                                                         let qset = map toLists $ map head $ toPBEQ pBEStr
+                                                         let mixProbs = getPriors optTree'
+                                                         let nBranch =  length $ toPBELengths pBEStr
+                                                         let branchLengths = toPBELengths pBEStr
+                                                         let branchLengths2 = everyOther $ getBL optTree' where 
+                                                                everyOther (x:y:z) = x:(everyOther z)
+                                                                everyOther [] = []
+                                                         print branchLengths 
+                                                         print branchLengths2
+                                                         --TODO TEST
+                                                         let interintra = "inter"
+                                                         let sitemap = mapBack $ pAlignment a
+                                                         let partials = map (map (map (toLists . trans))) $ toPBEList pBEStr
+                                                         let lMat = case interintra of 
+                                                                   "inter" -> interLMat (cats+1) 20
+                                                                   "intra" -> intraLMat (cats+1) 20
+                                                         putStr "1"
+                                                         putStr $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                                                         print $ posteriorTips 5  optTree  
+                                                         --calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
+                                                         return Nothing where
                                                                 spl = clean spl'
                                                                 piF = fromList $ safeScaledAAFrequencies a
                                                                 t2 = addModelFx (structDataN (cats+1) AminoAcid (pAlignment a) t) (gammaModel cats wagS piF [0.5]) $ flatPriors cats                                                                                                                                                             

@@ -47,6 +47,45 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
 logLikelihoodModel :: DNode -> Double
 logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLikelihoods pC $ likelihoods root where
 
+posteriorTips :: Int -> DNode -> [[[Double]]]
+posteriorTips numModels root@(DTree l m r pLs pC priors pis) = (map . map) normaliseL $ getLklList $ posteriorTipsLkl numModels root where
+                                                                   getLkl (i,j,k,lkl) = lkl
+                                                                   getLklList = (map . map) getLkl
+
+normaliseL :: [Double] -> [Double]                                                                        
+normaliseL xs = normalise' xs (sum xs)
+normalise' xs tot = map (/tot) xs
+
+posteriorTipsLkl :: Int -> DNode -> [[(Int,String,DNode,[Double])]]
+posteriorTipsLkl numModels root@(DTree _ _ _ _ _ _ _) = map (map (\(i,j,k)->(i,j,k,likelihoods k)))$ posteriorTipsList numModels root
+
+posteriorTipsList :: Int -> DNode -> [[(Int,String,DNode)]]
+posteriorTipsList numModels (DLeaf name dist seq partial model pl) = [map getLeaf [0..(numModels-1)]] where
+                                                                        getLeaf i = (i,name,(DLeaf name dist seq partial' model (calcLeafPL partial' dist model))) where
+                                                                                partial' = blankMat partial numModels i
+
+posteriorTipsList numModels (DINode l r bl model pl) = (map (map getINodeR) $ posteriorTipsList numModels r)++ (map (map getINodeL) $ posteriorTipsList numModels l) where
+                                                           getINodeL (i,name,node) = (i,name,DINode node r bl model (calcPL node r bl model))
+                                                           getINodeR (i,name,node) = (i,name,DINode l node bl model (calcPL l node bl model))
+
+posteriorTipsList numModels (DTree l m r pLs model priors pis) = (map (map getINodeR) $ posteriorTipsList numModels r) ++ (map (map getINodeM) $ posteriorTipsList numModels m) ++ (map (map getINodeL) $ posteriorTipsList numModels l) where
+                                                           getINodeL (i,name,node) = (i,name,DTree node m r (calcRootPL node m r) model priors pis)
+                                                           getINodeM (i,name,node) = (i,name,DTree l node r (calcRootPL l node r) model priors pis)
+                                                           getINodeR (i,name,node) = (i,name,DTree l m node (calcRootPL l m node) model priors pis)
+                                                                
+                                                           
+
+
+blankMat :: Matrix Double -> Int -> Int -> Matrix Double
+blankMat matrix numClass except = fromRows filtRows where
+                                        blocksize | traceShow (rows matrix) True = (rows matrix) `div` numClass
+                                        lower = except * blocksize
+                                        upper = lower + blocksize
+                                        myRows = toRows matrix
+                                        zeroVect = mapVector (\x->0.0) (head myRows)
+                                        filtRows = map (\(i,j) -> if (j >= lower && j < upper) then i else zeroVect) (zip myRows [0..])
+                                        
+
 likelihoods :: DNode -> [Double]
 likelihoods (DTree _ _ _ pLs _ priors pis) = map summarise (transpose likelihoodss) where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
@@ -69,24 +108,32 @@ calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL lef
 
 {-- gives [[[Matrix Double]]] where [branch [proc [left/right Matrix]]] --}
 {-- need to map from [branch [l/r [proc Matrix]]] --}
-toPBEList ((f,s,_,_):xs) = (map (\(i,j) -> [i,j]) $ zip f s):(toPBEList xs)
+toPBEList ((f,s,_,_,_):xs) = (map (\(i,j) -> [i,j]) $ zip f s):(toPBEList xs)
 toPBEList [] = []
 
-toPBELengths ((_,_,dist,_):xs) = dist:(toPBELengths xs)
+toPBELengths ((_,_,dist,_,_):xs) = dist:(toPBELengths xs)
 toPBELengths [] = []
 
-toPBESplits = map (\(_,_,_,a) -> a)
+toPBESplits = map (\(_,_,_,a,_) -> a)
+toPBEQ :: [([Matrix Double],[Matrix Double],Double,([String],[String]),[Matrix Double])] -> [[Matrix Double]]
+toPBEQ = map (\(_,_,_,_,a) -> a)
 
-getPartialBranchEnds :: DNode -> [([Matrix Double],[Matrix Double],Double,([String],[String]))]
+--getQ node = concat $ getQ' node [] 
+getQ = getQ'
+getQ' (DLeaf _ bl  _  _ model _)   = (map (\x-> snd $ x bl) model) 
+getQ' (DINode l r bl model _) = map (\x-> snd $ x bl) model
+
+
+getPartialBranchEnds :: DNode -> [([Matrix Double],[Matrix Double],Double,([String],[String]),[Matrix Double])]
 getPartialBranchEnds tree = getPartialBranchEnds' $ allRootings tree
 getPartialBranchEnds' (x:xs) = (getPartialBranchEndsLeaves'' x) ++ (getPartialBranchEndsX' xs) -- first tree is special case, only do leaves
 getPartialBranchEndsX' (x:xs) = (getPartialBranchEnds'' x) ++ (getPartialBranchEndsX' xs)
 getPartialBranchEndsX' [] = []
-getPartialBranchEnds'' (DTree left middle right pLS _ _ _) = (branchPL right,noright,head $ getBL right,splits): remainder where
+getPartialBranchEnds'' (DTree left middle right pLS _ _ _) = (branchPL right,noright,head $ getBL right,splits,getQ right): remainder where
                                                                 noright = allCombine (getPL left) (getPL middle) 
                                                                 remainder = (calc left middle) ++ (calc middle left)
                                                                 calc node other = case (node,other) of 
-                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o) -> [(branchPL l,allCombine (getPL o) (getPL right),head $ getBL l,((descendents o) ++ (descendents right), descendents l))]
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o) -> [(branchPL l,allCombine (getPL o) (getPL right),head $ getBL l,((descendents o) ++ (descendents right), descendents l),getQ l)]
                                                                                        (_,o) -> []
                                                                 splits = ((descendents left) ++ (descendents middle), (descendents right))
 
@@ -94,7 +141,7 @@ getPartialBranchEndsLeaves'' (DTree left middle right pLS _ _ _) = remainder whe
                                                                 noright = allCombine (getPL left) (getPL middle) 
                                                                 remainder = (calc right middle left) ++ (calc left middle right) ++ (calc middle left right)
                                                                 calc node other other'= case (node,other,other') of 
-                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o,o') -> [(branchPL l,allCombine (getPL o) (getPL o'),head $ getBL l,((descendents o) ++ (descendents o'), descendents l))]
+                                                                                       (l@(DLeaf _ bl _ leafPL _ _),o,o') -> [(branchPL l,allCombine (getPL o) (getPL o'),head $ getBL l,((descendents o) ++ (descendents o'), descendents l),getQ l)]
                                                                                        (_,_,_) -> []
 
 
@@ -378,11 +425,16 @@ optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikel
 getLeftBL (DTree (DINode _ _ x _ _) _ _ _ _ _ _) = x
 getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 
-optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ bestTree where
                                 startBL = getLeftBL tree
-                                b = safeGoldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
+                                startLL = logLikelihood tree
+                                b = goldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
                                 best = replace val [b] startBL
-
+                                bestTree' = setLeftBL tree best 
+                                --protect from golden section screw-ups
+                                bestTree = case (logLikelihood bestTree') of 
+                                                x | x < startLL -> tree
+                                                  | otherwise -> bestTree'
 
 boundedBLfunc = boundedFunction (-1E20) (repeat $ Just 0.0) (repeat Nothing)
 
@@ -789,13 +841,31 @@ simulateSequences seqDataType hiddenClasses stdGen length root = quickListAlignm
         seqs = map Phylo.Likelihood.sequence leaves
 
 
+annotateTreeWithNumberSwitchesSigma sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitchesSigma' sigma priors pis
+
+annotateTreeWithNumberSwitchesSigma' sigma priors pis (DINode l r (bl:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitchesSigma' sigma priors pis
+
+annotateTreeWithNumberSwitchesSigma' sigma priors pis (DLeaf name (bl:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
+
 annotateTreeWithNumberSwitches (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
-                                                                            an = annotateTreeWithNumberSwitches
-annotateTreeWithNumberSwitches' priors (DINode l r (bl:sigma:[]) models mats) = DINode l r [bl,sigma,switchbl] models mats where
-                                                                                        switchbl = calcSwitchBL priors models [bl,sigma]
+                                                                            an = annotateTreeWithNumberSwitches' priors pis
+annotateTreeWithNumberSwitches' priors pis (DINode l r (bl:sigma:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitches' priors pis
 
-annotateTreeWithNumberSwitches' priors (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
-                                                                                        switchbl = calcSwitchBL priors models [bl,sigma]
+annotateTreeWithNumberSwitches' priors pis (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
 
-calcSwitchBL priors models (bl:sigma:[]) = 1.0
+
+calcSwitchBL priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors switchingrates where
+                                                 mats = map (\x-> snd $ x [bl,sigma]) models
+                                                 switchingrates = map (switchingSum 20) $ zip pis mats --fix this magic number
+
+switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
+
                                                                                 
+

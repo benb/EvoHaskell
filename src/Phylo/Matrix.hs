@@ -93,3 +93,16 @@ fixDiag mat = runSTMatrix $ do
                 return s
                         
 
+getSwitchingRate mat pi nc = foldVector (+) 0.0 $ zipVectorWith (*) pi (mapVector ( * (-1)) $ takeDiag newmat) where
+                                diag = takeDiag newmat
+                                newmat = fixDiag $ fromBlocks blocks
+                                blocks=(filtBlocks 0) $ toBlocksEvery nc nc mat
+                                flat (x:xs) = x ++ (flat xs)
+                                flat [] = []
+                                empty = (nc><nc) $ repeat 0
+                                filtBlocks i (xlist:xs) = (filterList i xlist):(filtBlocks (i+1) xs)
+                                filtBlocks i [] = []
+                                filterList 0 (x:xs) = empty:xs
+                                filterList i (x:xs) = x:(filterList (i-1) xs)
+                                filterList i [] = []
+                             
