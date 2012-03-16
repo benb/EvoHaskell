@@ -116,7 +116,7 @@ main = do args <- getArgs
                 (Just a,Right t,(OptThmm2 spl'):xs)-> do (optTree',optParams) <- case xs of 
                                                                 list | NoOpt `elem` list -> return (t4,p) where
                                                                                               p = (initSigma ++ [initP0,initAlpha])
-                                                                                              t4 = getFuncT1A [1.0] mapped (1,numModels) model t3 p where
+                                                                                              t4 | trace ("NUMMODELS " ++ (show numModels)) True = getFuncT1A [1.0] mapped (1,numModels) model t3 p
                                                                 _ -> optBSParamsBLIO (1,numModels) mapped (map (\x->0.01) lower) lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
                                                          let optTree = annotateTreeWithNumberSwitches optTree'
                                                          print optTree
@@ -148,9 +148,8 @@ main = do args <- getArgs
                                                          let lMat = case interintra of 
                                                                    "inter" -> interLMat (cats+1) 20
                                                                    "intra" -> intraLMat (cats+1) 20
-                                                         putStr "1"
-                                                         putStr $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
-                                                         print $ posteriorTips 5  optTree  
+                                                         putStrLn $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                                                         putStrLn $ posteriorTipsCSV (cats+1) (pAlignment a) optTree'
                                                          --calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
                                                          return Nothing where
                                                                 spl = clean spl'

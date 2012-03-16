@@ -47,17 +47,51 @@ sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts
 logLikelihoodModel :: DNode -> Double
 logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLikelihoods pC $ likelihoods root where
 
-posteriorTips :: Int -> DNode -> [[[Double]]]
-posteriorTips numModels root@(DTree l m r pLs pC priors pis) = (map . map) normaliseL $ getLklList $ posteriorTipsLkl numModels root where
-                                                                   getLkl (i,j,k,lkl) = lkl
-                                                                   getLklList = (map . map) getLkl
+concatNewLine :: [[String]] -> String
+concatNewLine = intercalate "\n" . map (intercalate "\n")
 
+
+posteriorTipsCSV :: Int -> PatternAlignment -> DNode -> String
+posteriorTipsCSV i aln j = intercalate "\n" $ (posteriorTipsCSVX aln) $ posteriorTips i aln j
+
+posteriorTipsCSVX aln = map (posteriorTipsCSVX' aln)
+
+posteriorTipsCSVX' :: PatternAlignment ->  [(Int,String,DNode,[Double])] -> String
+posteriorTipsCSVX' (PatternAlignment names seqs _ _ _)  list = intercalate "\n" $ map (\(x,x',y,z) -> name ++ "," ++  (show x) ++ "," ++ (show x') ++"," ++ [z]  ++"," ++ (intercalate "," (map show y))) $ zip4 [0..] realseqpos (transpose post) alignedseq where
+                         post = map (\(x,y,z,lkl)->lkl) list
+                         name = head $ map (\(x,y,z,lkl) -> y) list
+                         id = fromJust $ findIndex (==name) names
+                         alignedseq = seqs !! id
+                         realseqpos = reverse $ foldl incPos [] alignedseq
+                         incPos [] '-' = [-1]
+                         incPos [] base = [0]
+                         incPos (x:xs) '-' = (x:x:xs) 
+                         incPos (x:xs) base = (x+1:x:xs)
+
+
+posteriorTipsCSV' :: (Int,String,DNode,[Double]) -> String
+posteriorTipsCSV' (i,j,k,lkl) = j ++ "," ++ (show i) ++ "," ++ (intercalate "," $ map show lkl)
+
+posteriorTips :: Int -> PatternAlignment -> DNode -> [[(Int,String,DNode,[Double])]]
+posteriorTips numModels aln root@(DTree l m r pLs pC priors pis) = map normaliseL2 $ posteriorTipsLkl numModels aln root where
+                                                                --   getLkl (i,j,k,lkl) = lkl
+                                                                --   getLklList = (map . map) getLkl
+normaliseL2 :: [(Int,String,DNode,[Double])] -> [(Int,String,DNode,[Double])]
+normaliseL2 list = replaced where
+                    unzipped = unzip4 list
+                    (_,_,_,lkls) = unzipped
+                    probs = normaliseL2' lkls
+                    replaced = map (\((i,j,k,lkl),probs) -> (i,j,k,probs)) $ zip list probs
+
+normaliseL2' :: [[Double]] -> [[Double]]
+normaliseL2' list = transpose $ normaliseL2'' $ transpose list
+normaliseL2'' = map normaliseL
 normaliseL :: [Double] -> [Double]                                                                        
 normaliseL xs = normalise' xs (sum xs)
 normalise' xs tot = map (/tot) xs
 
-posteriorTipsLkl :: Int -> DNode -> [[(Int,String,DNode,[Double])]]
-posteriorTipsLkl numModels root@(DTree _ _ _ _ _ _ _) = map (map (\(i,j,k)->(i,j,k,likelihoods k)))$ posteriorTipsList numModels root
+posteriorTipsLkl :: Int -> PatternAlignment -> DNode -> [[(Int,String,DNode,[Double])]]
+posteriorTipsLkl numModels aln root@(DTree _ _ _ _ _ _ _) = map (map (\(i,j,k)->(i,j,k,likelihoodsPerSite aln k)))$ posteriorTipsList numModels root
 
 posteriorTipsList :: Int -> DNode -> [[(Int,String,DNode)]]
 posteriorTipsList numModels (DLeaf name dist seq partial model pl) = [map getLeaf [0..(numModels-1)]] where
@@ -78,7 +112,7 @@ posteriorTipsList numModels (DTree l m r pLs model priors pis) = (map (map getIN
 
 blankMat :: Matrix Double -> Int -> Int -> Matrix Double
 blankMat matrix numClass except = fromRows filtRows where
-                                        blocksize | traceShow (rows matrix) True = (rows matrix) `div` numClass
+                                        blocksize = (rows matrix) `div` numClass
                                         lower = except * blocksize
                                         upper = lower + blocksize
                                         myRows = toRows matrix
@@ -90,7 +124,13 @@ likelihoods :: DNode -> [Double]
 likelihoods (DTree _ _ _ pLs _ priors pis) = map summarise (transpose likelihoodss) where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
                                                 likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
+
+likelihoodsPerSite aln tree = likelihoodss' where
+                                likelihoodss = likelihoods tree
+                                mapping = mapBack aln
+                                likelihoodss' = map (likelihoodss !!) mapping
                                                                 
+
 logLikelihood = logLikelihoodModel
 
 data PatternAlignment = PatternAlignment {names :: [String], seqs::[String], columns::[String], patterns::[String], counts::[Int]}
@@ -652,7 +692,7 @@ getFuncT1A priors mapping numBSParam model tree = func where
                 t2 = setBLMapped 1 tree getParamF 
                 perBranchParams = take paramCats $ splitLists paramsPerBranch params
                 params' = drop (paramsPerBranch * paramCats) params
-                getParamF node = (perBranchParams !! (mapping node))
+                getParamF node | trace ("params' " ++ (show params')) True = (perBranchParams !! (mapping node))
 
 getParamsT1 params tree = params
 
