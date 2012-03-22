@@ -100,7 +100,10 @@ main = do args <- getArgs
                                                                 putStrLn $ show $ zip [0..] $ getCols pAln 
                                                                 putStr $ splitsStr $ toPBESplits pBEStr
                                                                 --putStrLn $ "OK " ++ (show $ accEigQ (qMat) ((snd model)!!0))
-                                                                calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
+                                                                ans <- calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
+                                                                print sitemap
+                                                                stochmapOut ans sitemap [1.0] putStr
+                                                                print "OK"
                                                                 return Nothing
                                                                 {-c_test chandle $ fromIntegral 10-}
                 (Just a,Right t,(OptThmmP):[])-> return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show optTree) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) where
@@ -259,3 +262,39 @@ clean = clean' . trim where
 joinWith i (x:x':xs) = (show x) ++ i ++ (joinWith i (x':xs))
 joinWith i [x] = (show x) 
 joinWith i [] = []
+
+stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[[Double]])
+stochmapOrder (condE,priorE) mapping priors = order where
+                                                condE' = map (fixProc2 priors) condE
+                                                priorE' = map (fixProc priors) priorE
+                                                fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
+                                                fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
+                                                order = (map (\i-> (map (!!i) condE')) mapping, replicate (length mapping) priorE')
+
+stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
+stochmapOut (condE',priorE') mapping priors f = do 
+                                                f header
+                                                (mapM . mapM) f remainder
+                                                f "\n"
+                                                f headerSite 
+                                                mapM f remainderSite
+                                                f "\n"
+                                                f headerBranch
+                                                mapM f remainderBranch
+                                                return () where
+                                                 (condE'',priorE'') = stochmapOrder (condE',priorE') mapping priors
+                                                 condE=transpose condE''
+                                                 priorE=transpose priorE''
+                                                 header = "Branch\tSite\tConditional_expectation\tPrior_expectation\n"
+                                                 remainder = fmtBranch [0..] $ zip condE priorE 
+                                                 fmtBranch (b:bs) ((cond,prior):xs) = (fmtBranch' b [0..] cond prior)  : (fmtBranch bs xs)
+                                                 fmtBranch bs [] = []
+                                                 fmtBranch' b sites [] priors = []
+                                                 fmtBranch' b (site:sites) (cond:cs) (prior:ps) = ((show b) ++ "\t" ++ (show site) ++ "\t" ++ (show cond) ++ "\t" ++ (show prior) ++ "\n") : (fmtBranch' b sites cs ps)
+                                                 headerBranch = "Branch\tTotal_conditional_expectation\tTotal_prior_expectation\n"
+                                                 remainderBranch = fmtBranch2 [0..] $ zip condE priorE
+                                                 total xs = foldr (+) 0.0 xs
+                                                 fmtBranch2 bs [] = []
+                                                 fmtBranch2 (b:bs) ((cond,prior):xs) = ((show b) ++"\t" ++ (show $ total cond) ++ "\t" ++ (show $ total prior) ++ "\n") : (fmtBranch2 bs xs)
+                                                 headerSite = "Site\tTotal_conditional_expectation\tTotal_prior_expectation\n"
+                                                 remainderSite = fmtBranch2 [0..] $ zip condE'' priorE''
