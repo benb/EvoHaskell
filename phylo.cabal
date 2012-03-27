@@ -13,17 +13,22 @@ Build-Type:     Simple
 --       HS-Source-Dirs: src
 
 
-Executable seqcat
-        Main-Is: SeqCat.hs
-        HS-Source-Dirs: src
-Executable calclkl
-        C-sources: src/Phylo/nlopt_c.c
+--Executable seqcat
+--        Main-Is: SeqCat.hs
+--        HS-Source-Dirs: src
+--Executable calclkl
+--        C-sources: src/Phylo/nlopt_c.c
+--        Extensions: ForeignFunctionInterface
+--        Main-Is: CalcLkl.hs
+--        HS-Source-Dirs: src
+--Executable testopt
+--        C-sources: src/Phylo/nlopt_c.c
+--        Main-Is: testOpt.hs
+--        HS-Source-Dirs: src
+Executable smap
         Extensions: ForeignFunctionInterface
-        Main-Is: CalcLkl.hs
-        HS-Source-Dirs: src
-Executable testopt
         C-sources: src/Phylo/nlopt_c.c
-        Main-Is: testOpt.hs
+        Main-Is: SMap.hs
         HS-Source-Dirs: src
 library
         C-sources: src/Phylo/nlopt_c.c
