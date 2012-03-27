@@ -19,6 +19,7 @@ import Foreign.C.String (CString,newCString)
 import Phylo.Matrix
 import Stochmap
 import Data.Char (isSpace)
+import Phylo.NeXML
 
 data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
         deriving (Show,Eq,Ord)
@@ -100,6 +101,9 @@ main = do args <- getArgs
                                                                 putStrLn $ show $ zip [0..] $ getCols pAln 
                                                                 putStr $ splitsStr $ toPBESplits pBEStr
                                                                 --putStrLn $ "OK " ++ (show $ accEigQ (qMat) ((snd model)!!0))
+                                                                let xml = xmlTree t2
+                                                                putStrLn "Here comes the xml:"
+                                                                putStr xml
                                                                 ans <- calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                                 print sitemap
                                                                 stochmapOut ans sitemap [1.0] putStr
