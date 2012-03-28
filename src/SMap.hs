@@ -20,6 +20,8 @@ import Phylo.Matrix
 import Stochmap
 import Data.Char (isSpace)
 import Phylo.NeXML
+import Statistics.Quantile
+import qualified Data.Vector.Unboxed as UVec
 
 data Flag = NumCats String | AlignmentFile String | TreeFile String | Inter | Intra 
         deriving (Show,Eq,Ord)
@@ -66,15 +68,52 @@ main = do args <- getArgs
                                                let xml = xmlTree t2
                                                putStrLn "Here comes the xml:"
                                                putStr xml
-                                               ans <- calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
-                                               print sitemap
-                                               stochmapOut ans sitemap [1.0] putStr
+                                               let stochmapF a b c d e f g = calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites a b c d e f g Nothing
+                                               let stochmapT tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
+                                                                    sitemap' = mapBack $ pAlignment pAln'
+                                                                    pAln' = getAln tree
+                                                                    pBEStr' = getPartialBranchEnds tree
+                                                                    partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr'
+                                                                    qset' = map toLists $ getQMat tree
+                                                                    sitelikes' = [likelihoods tree] --FIXME
+                                                                    pi_i' = map toList $ getPi tree
+                                                                    branchLengths' = toPBELengths pBEStr
+                                                                    mixProbs' = getPriors tree
+                                               ans <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
+                                               putStrLn "OK0"
+                                               let stdGens = take 10 $ genList stdGen
+                                               print stdGens
+                                               let alnLength = length $ Phylo.Likelihood.columns pAln
+                                               putStrLn "OK0.1"
+                                               print $ map next stdGens
+                                               --let simulations =  map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               let simulations =  map (\x->t2) stdGens
+                                               let simPriors = map getPriors simulations
+                                               putStrLn $ "OK0.2 "  ++ (show $ length simulations)
+                                               print $ simulations
+                                               print $ map logLikelihood simulations
+                                               simStoch <- mapM stochmapT simulations
+                                               let simMappings = map treeToMap simulations
+                                               putStrLn $ "OK0.3 "  ++ (show $ length simMappings)
+                                               putStrLn $ "OK0.4 "  ++ (show $ length simStoch)
+                                               putStrLn "OK1"
+                                               print $ drop 9 simStoch
+                                               putStrLn "OK2"
+                                               putStrLn $ "sMappings " ++ (show $ length simMappings)
+                                               putStrLn $ "sMappings " ++ (show $ length simPriors)
+                                               putStrLn $ "sMappings " ++ (show $ length simStoch)
+                                               let quantileDist = qList (uniformQRaw simMappings simPriors simStoch) 100
+                                               print quantileDist 
+                                               let revQuantile = (flip qList) 100 $ myQuantile $  map (/(fromIntegral 100)) $ map fromIntegral $ map (reverseQuantile quantileDist) $ linearFromRaw (mapBack $ pAlignment $ getAln t2) (getPriors t2) ans
+                                               putStrLn $ "uniform? " ++ (show revQuantile)
+                                               --stochmapOut ans sitemap [1.0] putStr
                                                print "OK"
                                                return Nothing
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
 
+treeToMap tree = mapBack $ pAlignment $ getAln tree
 
 allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of
                                         Just a -> a
@@ -125,13 +164,13 @@ joinWith i (x:x':xs) = (show x) ++ i ++ (joinWith i (x':xs))
 joinWith i [x] = (show x) 
 joinWith i [] = []
 
-stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[[Double]])
+stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[Double])
 stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
                                                 fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
-                                                order = (map (\i-> (map (!!i) condE')) mapping, replicate (length mapping) priorE')
+                                                order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
 
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
 stochmapOut (condE',priorE') mapping priors f = do 
@@ -144,7 +183,9 @@ stochmapOut (condE',priorE') mapping priors f = do
                                                 f headerBranch
                                                 mapM f remainderBranch
                                                 return () where
-                                                 (condE'',priorE'') = stochmapOrder (condE',priorE') mapping priors
+                                                 (condE''',priorE''') = stochmapOrder (condE',priorE') mapping priors
+                                                 priorE'' = replicate (length mapping) priorE'''
+                                                 condE'' = transpose condE'''
                                                  condE=transpose condE''
                                                  priorE=transpose priorE''
                                                  header = "Branch\tSite\tConditional_expectation\tPrior_expectation\n"
@@ -160,3 +201,30 @@ stochmapOut (condE',priorE') mapping priors f = do
                                                  fmtBranch2 (b:bs) ((cond,prior):xs) = ((show b) ++"\t" ++ (show $ total cond) ++ "\t" ++ (show $ total prior) ++ "\n") : (fmtBranch2 bs xs)
                                                  headerSite = "Site\tTotal_conditional_expectation\tTotal_prior_expectation\n"
                                                  remainderSite = fmtBranch2 [0..] $ zip condE'' priorE''
+
+qList qFunc numQ = map (\x-> qFunc x numQ) [0..numQ]
+
+myQuantile myData q k = continuousBy medianUnbiased q k (UVec.fromList myData)
+
+
+reverseQuantile myQList point = fst $ head $ filter (\(x,y) -> point <= y) $ zip [0..] myQList 
+
+uniformQ :: [([[Double]],[Double])] -> (Int -> Int -> Double)
+uniformQ simData = partialFunc where 
+                      partialFunc q k | trace ("qData " ++ (show q ) ++ " " ++ (show k) ++ " : " ++  (show $ concatMap allDisc simData)) True = continuousBy medianUnbiased q k (UVec.fromList $ concatMap allDisc simData)
+
+linearFromRaw mapping priors ans = linearAns $ stochmapOrder ans mapping priors
+linearAns reformattedAns = allDisc reformattedAns
+reformatAns mapping priors stochResult = (map $ uncurry3 stochmapOrder) $ zip3 stochResult mapping priors
+uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors stochResult
+
+uncurry3 f (a,b,c) = f a b c 
+
+allDisc :: ([[Double]],[Double]) -> [Double]
+allDisc (condE:xs,priorE:ys) | traceShow ("len " ++ (show $ 1 + (length xs)) ++ " " ++ (show $ 1 + (length ys))) True = (allDisc' condE priorE) ++ (allDisc (xs,ys))
+allDisc ([],[]) = []
+allDisc (c,p) | traceShow (c,p) True = undefined
+allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) True = map (\x -> priorE - x) condE
+
+
+
