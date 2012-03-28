@@ -21,6 +21,8 @@ import Stochmap
 import Data.Char (isSpace)
 import Phylo.NeXML
 import Statistics.Quantile
+import Phylo.Graphics.Plotting
+import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
 import qualified Data.Vector.Unboxed as UVec
 
 data Flag = NumCats String | AlignmentFile String | TreeFile String | Inter | Intra 
@@ -86,8 +88,8 @@ main = do args <- getArgs
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                putStrLn "OK0.1"
                                                print $ map next stdGens
-                                               --let simulations =  map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
-                                               let simulations =  map (\x->t2) stdGens
+                                               let simulations =  map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                              -- let simulations =  map (\x->t2) stdGens
                                                let simPriors = map getPriors simulations
                                                putStrLn $ "OK0.2 "  ++ (show $ length simulations)
                                                print $ simulations
@@ -106,6 +108,7 @@ main = do args <- getArgs
                                                print quantileDist 
                                                let revQuantile = (flip qList) 100 $ myQuantile $  map (/(fromIntegral 100)) $ map fromIntegral $ map (reverseQuantile quantileDist) $ linearFromRaw (mapBack $ pAlignment $ getAln t2) (getPriors t2) ans
                                                putStrLn $ "uniform? " ++ (show revQuantile)
+                                               renderableToPDFFile (makePlot revQuantile PDF) 640 480 "out.pdf"
                                                --stochmapOut ans sitemap [1.0] putStr
                                                print "OK"
                                                return Nothing
@@ -225,6 +228,4 @@ allDisc (condE:xs,priorE:ys) | traceShow ("len " ++ (show $ 1 + (length xs)) ++ 
 allDisc ([],[]) = []
 allDisc (c,p) | traceShow (c,p) True = undefined
 allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) True = map (\x -> priorE - x) condE
-
-
 
