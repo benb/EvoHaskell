@@ -13,8 +13,8 @@ chooseLineWidth PDF = 0.25
 chooseLineWidth PS = 0.25                                                                                                                                                                                                                     
 chooseLineWidth SVG = 0.25             
 
-makePlot :: [Double] -> OutputType -> Renderable ()
-makePlot qD otype = toRenderable layout where                                                                                                                                                                                                 
+makePlot :: [Double] -> [(Double,Double)] -> OutputType -> Renderable ()
+makePlot qD nf otype = toRenderable layout where                                                                                                                                                                                                 
     layout = layout1_title ^="QQPlot"                                                                                                                                                                                                         
            $ layout1_background ^= solidFillStyle (opaque white)                                                                                                                                                                              
            $ layout1_left_axis ^: laxis_generate ^= const baxis
@@ -29,6 +29,7 @@ makePlot qD otype = toRenderable layout where
     xvals = [0.0,0.01..]
     xyvals :: [(Double,Double)]
     xyvals = zip xvals qD
+    xyArea = zip xvals nf
 
     qDLine = plot_lines_style ^= lineStyle (opaque blue)                                                                                                                                                                                      
            $ plot_lines_values ^= [xyvals]                                                                                                                                                                                            
@@ -40,7 +41,7 @@ makePlot qD otype = toRenderable layout where
            $ plot_points_title ^= "empirical"                                                                                                                                                                                                 
            $ defaultPlotPoints   
 
-    qDArea = plot_fillbetween_values ^= [(d, (v * 0.95, v * 1.05)) | (d,v) <-xyvals]                                                                                                                                                  
+    qDArea = plot_fillbetween_values ^= xyArea                                                                                                                                                 
                 $ plot_fillbetween_style  ^= solidFillStyle (withOpacity blue 0.2)                                                                                                                                                            
                 $ defaultPlotFillBetween    
 

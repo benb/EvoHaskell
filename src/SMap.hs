@@ -83,12 +83,14 @@ main = do args <- getArgs
                                                                     mixProbs' = getPriors tree
                                                ans <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                putStrLn "OK0"
-                                               let stdGens = take 10 $ genList stdGen
+                                               let numSim = 10
+                                               let numQuantile = 100
+                                               let stdGens = take numSim $ genList stdGen
                                                print stdGens
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                putStrLn "OK0.1"
                                                print $ map next stdGens
-                                               let simulations =  map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               let simulations = map optBLDFull0 $ map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
                                               -- let simulations =  map (\x->t2) stdGens
                                                let simPriors = map getPriors simulations
                                                putStrLn $ "OK0.2 "  ++ (show $ length simulations)
@@ -104,11 +106,17 @@ main = do args <- getArgs
                                                putStrLn $ "sMappings " ++ (show $ length simMappings)
                                                putStrLn $ "sMappings " ++ (show $ length simPriors)
                                                putStrLn $ "sMappings " ++ (show $ length simStoch)
-                                               let quantileDist = qList (uniformQRaw simMappings simPriors simStoch) 100
+                                               let quantileDist = qList (uniformQRaw simMappings simPriors simStoch) numQuantile
                                                print quantileDist 
-                                               let revQuantile = (flip qList) 100 $ myQuantile $  map (/(fromIntegral 100)) $ map fromIntegral $ map (reverseQuantile quantileDist) $ linearFromRaw (mapBack $ pAlignment $ getAln t2) (getPriors t2) ans
+                                               let revQuantile = revQuantileF ans numQuantile quantileDist t2
+                                               let simQuantiles = map (\(x,y) ->  revQuantileF x numQuantile quantileDist y ) $ zip simStoch simulations
+                                               let ninetyFive = map (\x-> (x!!a,x!!b)) $ map sort $ transpose simQuantiles where
+                                                            b :: Int
+                                                            a :: Int
+                                                            a = floor $ (fromIntegral numSim) * 0.025
+                                                            b = (ceiling ((fromIntegral numSim) * 0.975)) - 1
                                                putStrLn $ "uniform? " ++ (show revQuantile)
-                                               renderableToPDFFile (makePlot revQuantile PDF) 640 480 "out.pdf"
+                                               renderableToPDFFile (makePlot revQuantile ninetyFive PDF) 640 480 "out.pdf"
                                                --stochmapOut ans sitemap [1.0] putStr
                                                print "OK"
                                                return Nothing
@@ -116,6 +124,7 @@ main = do args <- getArgs
                Just str -> putStrLn str
                Nothing -> return ()
 
+revQuantileF x numQuantile quantileDist t2 = (flip qList) numQuantile $ myQuantile $  map (/(fromIntegral numQuantile)) $ map fromIntegral $ map (reverseQuantile quantileDist) $ linearFromRaw (mapBack $ pAlignment $ getAln t2) (getPriors t2) x
 treeToMap tree = mapBack $ pAlignment $ getAln tree
 
 allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of
