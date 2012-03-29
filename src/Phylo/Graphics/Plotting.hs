@@ -26,7 +26,8 @@ makePlot qD nf otype = toRenderable layout where
            $ defaultLayout1                                                                                                                                                                                                                   
 
     fg = opaque black 
-    xvals = [0.0,0.01..]
+    qLen = length qD
+    xvals =  [x/(fromIntegral qLen+1)|x<-[1.0..]]
     xyvals :: [(Double,Double)]
     xyvals = zip xvals qD
     xyArea = zip xvals nf

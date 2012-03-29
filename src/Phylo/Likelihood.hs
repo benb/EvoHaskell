@@ -393,7 +393,7 @@ optBLD = optBLDx optLeftBL
 optBLD0 = optBLDx (optLeftBLx 0)
 
 optBLDFull0 :: DNode -> DNode
-optBLDFull0 = optBLDFull  (optLeftBLx 0) 
+optBLDFull0 t | trace ("Start Opt " ++ (show t)) True = optBLDFull  (optLeftBLx 0) t
 optBLDFull f tree = optBLDFull' (logLikelihood tree) 1E-05 f tree
 optBLDFull' old cutoff f tree = case (new - old) of 
         x | x > cutoff -> optBLDFull' new cutoff f newtree

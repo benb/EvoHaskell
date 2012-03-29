@@ -84,7 +84,7 @@ main = do args <- getArgs
                                                ans <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                putStrLn "OK0"
                                                let numSim = 10
-                                               let numQuantile = 100
+                                               let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                print stdGens
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
@@ -223,7 +223,7 @@ reverseQuantile myQList point = fst $ head $ filter (\(x,y) -> point <= y) $ zip
 
 uniformQ :: [([[Double]],[Double])] -> (Int -> Int -> Double)
 uniformQ simData = partialFunc where 
-                      partialFunc q k | trace ("qData " ++ (show q ) ++ " " ++ (show k) ++ " : " ++  (show $ concatMap allDisc simData)) True = continuousBy medianUnbiased q k (UVec.fromList $ concatMap allDisc simData)
+                      partialFunc q k = continuousBy medianUnbiased q k (UVec.fromList $ concatMap allDisc simData)
 
 linearFromRaw mapping priors ans = linearAns $ stochmapOrder ans mapping priors
 linearAns reformattedAns = allDisc reformattedAns
@@ -236,5 +236,6 @@ allDisc :: ([[Double]],[Double]) -> [Double]
 allDisc (condE:xs,priorE:ys) | traceShow ("len " ++ (show $ 1 + (length xs)) ++ " " ++ (show $ 1 + (length ys))) True = (allDisc' condE priorE) ++ (allDisc (xs,ys))
 allDisc ([],[]) = []
 allDisc (c,p) | traceShow (c,p) True = undefined
-allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) True = map (\x -> priorE - x) condE
+--allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) False = undefined
+allDisc' condE priorE  = map (\x -> priorE - x) condE
 
