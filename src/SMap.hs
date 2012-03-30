@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import Phylo.Alignment
@@ -23,6 +24,7 @@ import Phylo.PhyloXML
 import Statistics.Quantile
 import Phylo.Graphics.Plotting
 import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
+import Control.DeepSeq
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -82,6 +84,7 @@ main = do args <- getArgs
           stdGen <- case seed of
                     Nothing -> getStdGen
                     Just x -> return $ mkStdGen x
+          let lMat = [interLMat (cats+1) 20,intraLMat (cats+1) 20]
           let lMat = case ii of
                 Inter -> interLMat (cats+1) 20
                 Intra -> intraLMat (cats+1) 20
@@ -122,69 +125,62 @@ main = do args <- getArgs
                                                                     pi_i' = map toList $ getPi tree
                                                                     branchLengths' = toPBELengths pBEStr
                                                                     mixProbs' = getPriors tree
-                                               ans <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
-                                               putStrLn "OK0"
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
-                                               print stdGens
+                                               ans' <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
+                                               let ans = stochmapOrder ans' sitemap (getPriors t2) 
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               putStrLn "OK0.1"
-                                               print $ map next stdGens
                                                let simulations = map optBLDFull0 $ map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
-                                              -- let simulations =  map (\x->t2) stdGens
-                                               let simPriors = map getPriors simulations
-                                               putStrLn $ "OK0.2 "  ++ (show $ length simulations)
-                                               print $ simulations
-                                               print $ map logLikelihood simulations
-                                               simStoch <- mapM stochmapT simulations
-                                               let simMappings = map treeToMap simulations
-                                               putStrLn $ "OK0.3 "  ++ (show $ length simMappings)
-                                               putStrLn $ "OK0.4 "  ++ (show $ length simStoch)
-                                               putStrLn "OK1"
-                                               print $ drop 9 simStoch
-                                               putStrLn "OK2"
-                                               putStrLn $ "sMappings " ++ (show $ length simMappings)
-                                               putStrLn $ "sMappings " ++ (show $ length simPriors)
-                                               putStrLn $ "sMappings " ++ (show $ length simStoch)
-                                               let quantileDist = qList (uniformQRaw simMappings simPriors simStoch) numQuantile
-                                               print quantileDist 
-                                               let revQuantile = revQuantileF ans numQuantile quantileDist t2
-                                               let simQuantiles = map (\(x,y) ->  revQuantileF x numQuantile quantileDist y ) $ zip simStoch simulations
-                                               let ninetyFive = map (\x-> (x!!a,x!!b)) $ map sort $ transpose simQuantiles where
-                                                            b :: Int
-                                                            a :: Int
-                                                            a = floor $ (fromIntegral numSim) * 0.025
-                                                            b = (ceiling ((fromIntegral numSim) * 0.975)) - 1
-                                               putStrLn $ "uniform? " ++ (show revQuantile)
-                                               renderableToPDFFile (makePlot revQuantile ninetyFive PDF) 640 480 "out.pdf"
+                                         --      let simulations = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               simStoch' <- mapM stochmapT simulations
+                                               let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
+                                             --  print $ length3 $ fst ans
+                                               --print $ length2 $ fst ans
+                                               print $ map fst simStoch
+                                               print "OK1"
+                                               let simStochDesc = map discrep simStoch
+                                               let ansDesc = discrep ans
+                                               print "OK2"
+                                               let tot x = foldr (+) (0.0) x
+                                               let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
+                                               let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
+                                               let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
+                                               renderableToPDFFile (makePlot line (zip lower upper) PDF) 640 480 "out.pdf"
+                                               renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 640 480 "out2.pdf"
+                                               renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 640 480 "out3.pdf"
                                                --stochmapOut ans sitemap [1.0] putStr
-                                               print "OK"
+                                               --print "OK"
                                                return Nothing
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
 
-revQuantileF x numQuantile quantileDist t2 = (flip qList) numQuantile $ myQuantile $  map (/(fromIntegral numQuantile)) $ map fromIntegral $ map (reverseQuantile quantileDist) $ linearFromRaw (mapBack $ pAlignment $ getAln t2) (getPriors t2) x
+length2 = map length
+length3 = map length2
+
+reverseQuantile myQList point = fst $ head $ filter (\(x,y) -> point <= y) $ zip [0..] myQList 
+
+discrep :: ([[Double]], [Double]) -> [[Double]]
+discrep ((x:xs),(y:ys)) = (map (\i->i-y) x):(discrep (xs,ys))
+discrep ([],[]) = []
+
+makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double])
+makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper) where
+                                        revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
+                                        revQuantileRawF x =  UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
+
+                                        quantileF d q = continuousBy medianUnbiased q numQuantile d
+                                        simVec = UVec.fromList $ concat simulated
+                                        simQuantiles = map (quantileF simVec) [0..numQuantile]
+
+                                        numSim = length simulated
+                                        revQuantileSimS = map sort $ transpose $ map revQuantile simulated
+                                        lowerI = floor $ (fromIntegral numSim) * 0.025
+                                        upperI = (ceiling ((fromIntegral numSim) * 0.975)) - 1 
+                                        lower = map (!!lowerI) revQuantileSimS
+                                        upper = map (!!upperI) revQuantileSimS
+
 treeToMap tree = mapBack $ pAlignment $ getAln tree
-
-allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of
-                                        Just a -> a
-                                        Nothing -> other
-                                 where other = length sets
-allIn = allInGeneric allInDynamic'
-allInNoRoot = allInGeneric allInNoRoot'
-
-
-allIn' :: [String] -> [String] -> [String] -> Bool
-allIn' l r set = (l \\ set == [] || r \\ set == []) --we want l or r to be fully contained within 'set'
-
-allInNoRoot' :: [String] -> [String] -> [String] -> Bool
-allInNoRoot' l r set = ((l \\ set == []) && (set \\ l /= [])) || ((r \\ set == []) &&  (set \\ r /= [])) --we want l or r to be fully contained with in 'set', but not the same as 'set'
-                        
---if first symbol is '@' then use noRoot version
-allInDynamic' :: [String] -> [String] -> [String] -> Bool
-allInDynamic' l r ("@":set) = allInNoRoot' l r set
-allInDynamic' l r set = allIn' l r set
 
 
 splitBy delim s = ans where
@@ -220,8 +216,8 @@ stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[
 stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
-                                                fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
-                                                fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
+                                                fixProc pr x | trace ("pr " ++ (take 50 $ show pr) ++ (take 50 $ show x)) True  = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
+                                                fixProc2 pr xs | trace ("pr2 " ++ (take 50 $ show pr)) True = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
 
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
@@ -256,16 +252,15 @@ stochmapOut (condE',priorE') mapping priors f = do
 
 qList qFunc numQ = map (\x-> qFunc x numQ) [0..numQ]
 
-myQuantile myData q k = continuousBy medianUnbiased q k (UVec.fromList myData)
 
 
-reverseQuantile myQList point = fst $ head $ filter (\(x,y) -> point <= y) $ zip [0..] myQList 
 
 uniformQ :: [([[Double]],[Double])] -> (Int -> Int -> Double)
 uniformQ simData = partialFunc where 
-                      partialFunc q k = continuousBy medianUnbiased q k (UVec.fromList $ concatMap allDisc simData)
+                      partialFunc q k | trace ("Made vec " ++ (show vec)) True = continuousBy medianUnbiased q k vec
+                      vec | trace ("Making vector " ++ (take 10 $ show simData)) True = (UVec.fromList $ concatMap allDisc simData)
 
-linearFromRaw mapping priors ans = linearAns $ stochmapOrder ans mapping priors
+linearFromRaw mapping priors ans | trace "linearFromRaw" True = linearAns $ stochmapOrder ans mapping priors
 linearAns reformattedAns = allDisc reformattedAns
 reformatAns mapping priors stochResult = (map $ uncurry3 stochmapOrder) $ zip3 stochResult mapping priors
 uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors stochResult
@@ -273,6 +268,7 @@ uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors s
 uncurry3 f (a,b,c) = f a b c 
 
 allDisc :: ([[Double]],[Double]) -> [Double]
+allDisc a | trace ("allDisc" ++ (take 20 $ show a)) False = undefined
 allDisc (condE:xs,priorE:ys) | traceShow ("len " ++ (show $ 1 + (length xs)) ++ " " ++ (show $ 1 + (length ys))) True = (allDisc' condE priorE) ++ (allDisc (xs,ys))
 allDisc ([],[]) = []
 allDisc (c,p) | traceShow (c,p) True = undefined
