@@ -19,7 +19,8 @@ makePlot qD nf otype = toRenderable layout where
            $ layout1_background ^= solidFillStyle (opaque white)                                                                                                                                                                              
            $ layout1_left_axis ^: laxis_generate ^= const baxis
            $ layout1_bottom_axis ^: laxis_generate ^= const baxis
-           $ layout1_plots ^= [ Left (toPlot qDPoints)                                                                                                                                                                                          
+           $ layout1_plots ^= [ Left (toPlot xEqualYLine)
+                              , Left (toPlot qDPoints)                                                                                                                                                                                          
                               , Left (toPlot qDArea)                                                                                                                                                                                       
                               ]                                                                                                                                                                                                               
            $ setLayout1Foreground fg                                                                                                                                                                                                          
@@ -31,6 +32,11 @@ makePlot qD nf otype = toRenderable layout where
     xyvals :: [(Double,Double)]
     xyvals = zip xvals qD
     xyArea = zip xvals nf
+    xEqualY = zip xvals xvals
+
+    xEqualYLine = plot_lines_style ^= dashedLine 1.0 [1.0,1.0] (opaque black)
+                $ plot_lines_values ^= [xEqualY]
+                $ defaultPlotLines
 
     qDLine = plot_lines_style ^= lineStyle (opaque blue)                                                                                                                                                                                      
            $ plot_lines_values ^= [xyvals]                                                                                                                                                                                            

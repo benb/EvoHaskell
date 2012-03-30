@@ -19,34 +19,75 @@ import Foreign.C.String (CString,newCString)
 import Phylo.Matrix
 import Stochmap
 import Data.Char (isSpace)
-import Phylo.NeXML
+import Phylo.PhyloXML
 import Statistics.Quantile
 import Phylo.Graphics.Plotting
 import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
 import qualified Data.Vector.Unboxed as UVec
 
-data Flag = NumCats String | AlignmentFile String | TreeFile String | Inter | Intra 
-        deriving (Show,Eq,Ord)
-options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
-            Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
-            Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories" ,
-            Option [] ["inter"] (NoArg Inter) "Inter",
-            Option [] ["intra"] (NoArg Intra) "Intra"]
+data LMat = Inter | Intra deriving Show
+--handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
+options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment",
+            Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree",
+            Option [] ["num-cats"] (ReqArg optNumCatsR "NUMGAMMACATS") "Number of Gamma Rate Categories" ,
+            Option [] ["inter"] (NoArg optInterR) "Inter",
+            Option [] ["intra"] (NoArg optIntraR) "IntraR",
+            Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
+          , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
+            ]
+
+data Options = Options  {
+        optAln  :: String,
+        optTree :: String,
+        optNumCats :: Int,
+        optLMat :: LMat,
+        optBootCount :: Int,
+        optSeed :: Maybe Int
+} deriving Show
+
+defaultOptions :: Options
+defaultOptions = Options {
+        optAln = "in.fa",
+        optTree = "in.tre",
+        optNumCats = 4,
+        optLMat = Inter,
+        optBootCount = 10,
+        optSeed = Nothing
+}
+
+optAlnR arg opt = return opt { optAln = arg }
+optTreeR arg opt = return opt { optTree = arg }
+optNumCatsR arg opt = return opt {optNumCats = (read arg)}
+optInterR opt = return opt {optLMat = Inter}
+optIntraR opt = return opt {optLMat = Intra}
+optBootCountR arg opt = return opt {optBootCount = (read arg)}
+optSeedR arg opt = return opt {optSeed = (read arg)}
+---
 
 main = do args <- getArgs
-          (aln,tree,stdGen,remainOpts,nonOpts) <- case getOpt Permute options args of 
-                         (((AlignmentFile aln):(TreeFile tre):xs),nonOpts,[]) -> do aln <- parseAlignmentFile parseUniversal aln
-                                                                                    tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                                    stdGen <- getStdGen
-                                                                                    return (aln,tree,stdGen,xs,nonOpts)
-                         (_,_,msgs) -> error $ concat msgs
-          let (cats,ii,remainOpts') = case remainOpts of 
-                (NumCats n):i:rem -> (read n,i,rem)
-                (i:rem) -> (4,i,rem)
+          let ( actions, nonOpts, msgs ) = getOpt Permute options args
+          opts <- foldl (>>=) (return defaultOptions) actions
+          print opts
+          let Options {
+                  optAln = aln,
+                  optTree = tree,
+                  optNumCats = cats,
+                  optLMat = ii,
+                  optBootCount = numSim,
+                  optSeed = seed
+          } = opts
+          print seed
+          print numSim
+          print cats 
+          stdGen <- case seed of
+                    Nothing -> getStdGen
+                    Just x -> return $ mkStdGen x
           let lMat = case ii of
                 Inter -> interLMat (cats+1) 20
                 Intra -> intraLMat (cats+1) 20
-          output <- case (aln,tree,nonOpts) of 
+          aln' <- parseAlignmentFile parseUniversal aln                                                                                                       
+          tree' <- (liftM readBiNewickTree) (readFile tree)                                                                                                    
+          output <- case (aln',tree',nonOpts) of 
                 (Just a,Right t,params)->   do let alpha:sigma:priorZero:[] = map read $ take 3 params
                                                let pAln = pAlignment a
                                                let (nSite,nCols,multiplicites) = getAlnData pAln where
@@ -67,7 +108,7 @@ main = do args <- getArgs
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let xml = xmlTree t2
+                                               let xml = unlines $ simplePhyloXML (annotateTreeWithNumberSwitchesSigma sigma t2)
                                                putStrLn "Here comes the xml:"
                                                putStr xml
                                                let stochmapF a b c d e f g = calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites a b c d e f g Nothing
@@ -83,7 +124,6 @@ main = do args <- getArgs
                                                                     mixProbs' = getPriors tree
                                                ans <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                putStrLn "OK0"
-                                               let numSim = 10
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                print stdGens
