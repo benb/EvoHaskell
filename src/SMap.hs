@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns,ScopedTypeVariables #-}
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import Phylo.Alignment
@@ -25,17 +25,20 @@ import Statistics.Quantile
 import Phylo.Graphics.Plotting
 import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
 import Control.DeepSeq
+import Data.Char
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
+data OptLevel = FullOpt | BranchOpt | QuickBranchOpt | NoOpt deriving Show
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree",
             Option [] ["num-cats"] (ReqArg optNumCatsR "NUMGAMMACATS") "Number of Gamma Rate Categories" ,
             Option [] ["inter"] (NoArg optInterR) "Inter",
-            Option [] ["intra"] (NoArg optIntraR) "IntraR",
-            Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
+            Option [] ["intra"] (NoArg optIntraR) "IntraR"
+          , Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
           , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
+          , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
             ]
 
 data Options = Options  {
@@ -44,7 +47,8 @@ data Options = Options  {
         optNumCats :: Int,
         optLMat :: LMat,
         optBootCount :: Int,
-        optSeed :: Maybe Int
+        optSeed :: Maybe Int,
+        optLevel :: OptLevel
 } deriving Show
 
 defaultOptions :: Options
@@ -54,7 +58,8 @@ defaultOptions = Options {
         optNumCats = 4,
         optLMat = Inter,
         optBootCount = 10,
-        optSeed = Nothing
+        optSeed = Nothing,
+        optLevel = BranchOpt
 }
 
 optAlnR arg opt = return opt { optAln = arg }
@@ -63,7 +68,14 @@ optNumCatsR arg opt = return opt {optNumCats = (read arg)}
 optInterR opt = return opt {optLMat = Inter}
 optIntraR opt = return opt {optLMat = Intra}
 optBootCountR arg opt = return opt {optBootCount = (read arg)}
-optSeedR arg opt = return opt {optSeed = (read arg)}
+optSeedR arg opt = return opt {optSeed = Just (read arg)}
+optFR arg opt = optFR' (map toLower arg) opt
+optFR' arg opt | arg=="full" = return opt {optLevel = FullOpt}
+               | arg=="branch" = return opt {optLevel = BranchOpt}
+               | arg=="quick" = return opt {optLevel = QuickBranchOpt}
+               | arg=="none" = return opt {optLevel = NoOpt}
+               | otherwise = error $ "need to specify one of full, branch, quick or none instead of " ++ arg
+
 ---
 
 main = do args <- getArgs
@@ -76,7 +88,8 @@ main = do args <- getArgs
                   optNumCats = cats,
                   optLMat = ii,
                   optBootCount = numSim,
-                  optSeed = seed
+                  optSeed = seed,
+                  optLevel = optBoot
           } = opts
           print seed
           print numSim
@@ -84,7 +97,6 @@ main = do args <- getArgs
           stdGen <- case seed of
                     Nothing -> getStdGen
                     Just x -> return $ mkStdGen x
-          let lMat = [interLMat (cats+1) 20,intraLMat (cats+1) 20]
           let lMat = case ii of
                 Inter -> interLMat (cats+1) 20
                 Intra -> intraLMat (cats+1) 20
@@ -130,12 +142,18 @@ main = do args <- getArgs
                                                ans' <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                let ans = stochmapOrder ans' sitemap (getPriors t2) 
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               let simulations = map optBLDFull0 $ map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
-                                         --      let simulations = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               simulations :: [DNode] <- case optBoot of 
+                                                                      FullOpt -> (liftM (map fst)) $ mapM (\mytree -> optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])) simulations' where
+                                                                                       lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
+                                                                                       upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
+                                                                                       numModels = 1
+                                                                                       myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                      BranchOpt -> return $ map optBLDFull0 simulations'
+                                                                      QuickBranchOpt -> return $ map optBLDFull0 simulations'
+                                                                      NoOpt -> return $ simulations'
                                                simStoch' <- mapM stochmapT simulations
                                                let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
-                                             --  print $ length3 $ fst ans
-                                               --print $ length2 $ fst ans
                                                print $ map fst simStoch
                                                print "OK1"
                                                let simStochDesc = map discrep simStoch
@@ -145,9 +163,13 @@ main = do args <- getArgs
                                                let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
-                                               renderableToPDFFile (makePlot line (zip lower upper) PDF) 640 480 "out.pdf"
-                                               renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 640 480 "out2.pdf"
-                                               renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 640 480 "out3.pdf"
+                                               print line
+                                               print line1
+                                               print $ take 5 line2
+                                               print line2
+                                               renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 "out-all.pdf"
+                                               renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 "out-branch.pdf"
+                                               renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 "out-site.pdf"
                                                --stochmapOut ans sitemap [1.0] putStr
                                                --print "OK"
                                                return Nothing
@@ -158,7 +180,10 @@ main = do args <- getArgs
 length2 = map length
 length3 = map length2
 
-reverseQuantile myQList point = fst $ head $ filter (\(x,y) -> point <= y) $ zip [0..] myQList 
+--FIXME not sure about this
+reverseQuantile myQList point = case (filter (\(x,y) -> point <= y) $ zip [0..] myQList) of
+                                        (x:xs) -> fst $x
+                                        [] -> length $ myQList
 
 discrep :: ([[Double]], [Double]) -> [[Double]]
 discrep ((x:xs),(y:ys)) = (map (\i->i-y) x):(discrep (xs,ys))
@@ -166,8 +191,8 @@ discrep ([],[]) = []
 
 makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double])
 makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper) where
-                                        revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
-                                        revQuantileRawF x =  UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
+                                        revQuantile x | trace ("XX " ++ (show x)) True = map (quantileF (revQuantileRawF x)) [0..numQuantile]
+                                        revQuantileRawF x = UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
 
                                         quantileF d q = continuousBy medianUnbiased q numQuantile d
                                         simVec = UVec.fromList $ concat simulated
@@ -274,4 +299,25 @@ allDisc ([],[]) = []
 allDisc (c,p) | traceShow (c,p) True = undefined
 --allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) False = undefined
 allDisc' condE priorE  = map (\x -> priorE - x) condE
+                                        
+allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of                                                                                                                                                         
+                                        Just a -> a                                                                                                                                                                                           
+                                        Nothing -> other                                                                                                                                                                                      
+                                 where other = length sets                                                                                                                                                                                    
 
+allIn = allInGeneric allInDynamic'                                                                                                                                                                                                            
+allInNoRoot = allInGeneric allInNoRoot'                                                                                                                                                                                                       
+                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                              
+allIn' :: [String] -> [String] -> [String] -> Bool                                                                                                                                                                                            
+allIn' l r set = (l \\ set == [] || r \\ set == []) --we want l or r to be fully contained within 'set'                                                                                                                                       
+                                                                                                                                                                                                                                              
+allInNoRoot' :: [String] -> [String] -> [String] -> Bool                                                                                                                                                                                      
+allInNoRoot' l r set = ((l \\ set == []) && (set \\ l /= [])) || ((r \\ set == []) &&  (set \\ r /= [])) --we want l or r to be fully contained with in 'set', but not the same as 'set'                                                      
+                                                                                                                                                                                                                                              
+--if first symbol is '@' then use noRoot version                                                                                                                                                                                              
+allInDynamic' :: [String] -> [String] -> [String] -> Bool                                                                                                                                                                                     
+allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
+allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
+                                                                                                                                                                                                                                              
+                                                             

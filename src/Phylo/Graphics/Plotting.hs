@@ -5,6 +5,7 @@ import Data.Accessor.Tuple
 import Data.Colour                                                                                                                                                                                                                            
 import Data.Colour.Names                                                                                                                                                                                                                      
 import Data.Colour.SRGB 
+import Debug.Trace
 
 data OutputType = PNG | PS | PDF | SVG                                                                                                                                                                                                        
 
@@ -14,7 +15,7 @@ chooseLineWidth PS = 0.25
 chooseLineWidth SVG = 0.25             
 
 makePlot :: [Double] -> [(Double,Double)] -> OutputType -> Renderable ()
-makePlot qD nf otype = toRenderable layout where                                                                                                                                                                                                 
+makePlot qD nf otype | trace ("makePlot " ++ ((show $ length qD) ++ " " ++ (show $ length nf))) True = toRenderable layout where                                                                                                                                                                                                 
     layout = layout1_title ^="QQPlot"                                                                                                                                                                                                         
            $ layout1_background ^= solidFillStyle (opaque white)                                                                                                                                                                              
            $ layout1_left_axis ^: laxis_generate ^= const baxis
@@ -28,7 +29,7 @@ makePlot qD nf otype = toRenderable layout where
 
     fg = opaque black 
     qLen = length qD
-    xvals =  [(fromIntegral x)/(fromIntegral qLen+1)|x<-[1..qLen]]
+    xvals =  [(fromIntegral x)/(fromIntegral qLen+1)|x<-[1..(qLen+1)]]
     xyvals :: [(Double,Double)]
     xyvals = zip xvals qD
     xyArea = zip xvals nf
