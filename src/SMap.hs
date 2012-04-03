@@ -33,11 +33,9 @@ import qualified Data.Vector.Unboxed as UVec
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt | BranchOpt | QuickBranchOpt | NoOpt deriving Show
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
-options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment",
-            Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree",
-            Option [] ["num-cats"] (ReqArg optNumCatsR "NUMGAMMACATS") "Number of Gamma Rate Categories" ,
-            Option [] ["inter"] (NoArg optInterR) "Inter",
-            Option [] ["intra"] (NoArg optIntraR) "IntraR"
+options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
+          , Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree"
+          , Option [] ["num-cats"] (ReqArg optNumCatsR "NUMGAMMACATS") "Number of Gamma Rate Categories" 
           , Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
           , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
           , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
@@ -47,7 +45,6 @@ data Options = Options  {
         optAln  :: String,
         optTree :: String,
         optNumCats :: Int,
-        optLMat :: LMat,
         optBootCount :: Int,
         optSeed :: Maybe Int,
         optLevel :: OptLevel
@@ -58,7 +55,6 @@ defaultOptions = Options {
         optAln = "in.fa",
         optTree = "in.tre",
         optNumCats = 4,
-        optLMat = Inter,
         optBootCount = 10,
         optSeed = Nothing,
         optLevel = BranchOpt
@@ -67,8 +63,6 @@ defaultOptions = Options {
 optAlnR arg opt = return opt { optAln = arg }
 optTreeR arg opt = return opt { optTree = arg }
 optNumCatsR arg opt = return opt {optNumCats = (read arg)}
-optInterR opt = return opt {optLMat = Inter}
-optIntraR opt = return opt {optLMat = Intra}
 optBootCountR arg opt = return opt {optBootCount = (read arg)}
 optSeedR arg opt = return opt {optSeed = Just (read arg)}
 optFR arg opt = optFR' (map toLower arg) opt
@@ -88,7 +82,6 @@ main = do args <- getArgs
                   optAln = aln,
                   optTree = tree,
                   optNumCats = cats,
-                  optLMat = ii,
                   optBootCount = numSim,
                   optSeed = seed,
                   optLevel = optBoot
@@ -99,9 +92,6 @@ main = do args <- getArgs
           stdGen <- case seed of
                     Nothing -> getStdGen
                     Just x -> return $ mkStdGen x
-          let lMat = case ii of
-                Inter -> interLMat (cats+1) 20
-                Intra -> intraLMat (cats+1) 20
           aln' <- parseAlignmentFile parseUniversal aln                                                                                                       
           tree' <- (liftM readBiNewickTree) (readFile tree)                                                                                                    
           output <- case (aln',tree',nonOpts) of 
@@ -125,8 +115,8 @@ main = do args <- getArgs
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let stochmapF a b c d e f g = calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites a b c d e f g Nothing
-                                               let stochmapT tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
+                                               let stochmapF a b c d e f g lM = calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites a b c d e f g Nothing
+                                               let stochmapT lM tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' lM where
                                                                     sitemap' = mapBack $ pAlignment pAln'
                                                                     pAln' = getAln tree
                                                                     pBEStr' = getPartialBranchEnds tree
@@ -138,8 +128,6 @@ main = do args <- getArgs
                                                                     mixProbs' = getPriors tree
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
-                                               ans' <- stochmapT t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
-                                               let ans = stochmapOrder ans' sitemap (getPriors t2) 
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
                                                simulations :: [DNode] <- case optBoot of 
@@ -155,33 +143,31 @@ main = do args <- getArgs
                                                                       BranchOpt -> return $ parMap rseq optBLDFull0 simulations'
                                                                       QuickBranchOpt -> return $ parMap rseq optBLDFull0 simulations'
                                                                       NoOpt -> return $ simulations'
-                                               simStoch' <- mapM stochmapT simulations
-                                               let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
-                                               print $ map fst simStoch
-                                               print "OK1"
-                                               let simStochDesc = map discrep simStoch
-                                               let ansDesc = discrep ans
-                                               print "OK2"
-                                               let tot x = foldr (+) (0.0) x
-                                               let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
-                                               let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
-                                               let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
-                                               let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
-                                               print edgeQuantileMap
-                                               putStrLn "Here comes the xml:"
-                                               let tempTree = annotateTreeWith edgeQuantileMap t2
-                                               putStrLn "Temp Tree"
-                                               print tempTree
-                                               putStr $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
-                                               print line
-                                               print line1
-                                               print $ take 5 line2
-                                               print line2
-                                               renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 "out-all.pdf"
-                                               renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 "out-branch.pdf"
-                                               renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 "out-site.pdf"
-                                               --stochmapOut ans sitemap [1.0] putStr
-                                               --print "OK"
+                                               let outputMat (name,lM) = do ans' <- stochmapT lM t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
+                                                                            let ans = stochmapOrder ans' sitemap (getPriors t2) 
+                                                                            simStoch' <- mapM (stochmapT lM) simulations
+                                                                            let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
+                                                                            print $ map fst simStoch
+                                                                            print "OK1"
+                                                                            let simStochDesc = map discrep simStoch
+                                                                            let ansDesc = discrep ans
+                                                                            print "OK2"
+                                                                            let tot x = foldr (+) (0.0) x
+                                                                            let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
+                                                                            let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
+                                                                            let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
+                                                                            let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
+                                                                            print edgeQuantileMap
+                                                                            putStrLn "Here comes the xml:"
+                                                                            let tempTree = annotateTreeWith edgeQuantileMap t2
+                                                                            putStrLn "Temp Tree"
+                                                                            print tempTree
+                                                                            putStr $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
+                                                                            renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
+                                                                            renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-branch.pdf"
+                                                                            renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                               outputMat ("inter",interLMat (cats+1) 20)
+                                               outputMat ("intra",intraLMat (cats+1) 20)
                                                return Nothing
           case output of
                Just str -> putStrLn str
