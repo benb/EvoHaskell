@@ -20,6 +20,8 @@ import Debug.Trace
 import Phylo.Data
 import System.Random
 import Numeric.GSL.Differentiation
+import qualified Data.Vector as DVec
+import Data.Vector ((!))
 
 
 -- |Combine two sets of partial likelihoods along two branches
@@ -263,6 +265,7 @@ getPartial' classes AminoAcid (x:xs) = (aaPartial classes x):(getPartial' classe
 getPartial' classes Nucleotide (x:xs) = error "Nucleotides unimplemented"
 
 aaOrder = ['A','R','N','D','C','Q','E','G','H','I','L','K','M','F','P','S','T','W','Y','V']
+aaOrderVec = DVec.fromList aaOrder
 aaPartial classes x | isGapChar x = buildVector (20*classes) (\i->1.0) 
                     | otherwise = case findIndex (==x) aaOrder of 
                                        Just index -> buildVector (20*classes) (\i -> if i`mod`20==index then 1.0 else 0.0) where
@@ -846,27 +849,25 @@ makeSimulatedTree' :: Bool -> SeqDataType -> Int -> StdGen -> [Int] -> [Int] -> 
 makeSimulatedTree' withGaps Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimplemented"
 
 makeSimulatedTree' withGaps AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist oldSeq _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
-        myMats :: [Matrix Double]
-        myMats = map (\x -> fst $x dist) modelList
-        myVectors :: [[[Double]]]
-        myVectors = map toLists $ map (myMats!!) models
-        myVectors' = (map (\(vec,base) -> vec!!base) $ zip myVectors topSeq)
-        bottomSeq'= map (aaOrder!!) $ map (`mod` 20 ) $ map (\(p,pris) -> drawFromDist pris p) $ zip (randomRs (0.0,1.0) stdGen) myVectors'
+        myMats = DVec.fromList $ map DVec.fromList $ map toLists $ map (\x -> fst $x dist) modelList
+        myVectors :: [DVec.Vector [Double]]
+        myVectors = map (myMats!) models
+        myVectors' = (map (\(vec,base) -> vec!base) $ zip myVectors topSeq)
+        bottomSeq'= map (aaOrderVec!) $ map (`mod` 20 ) $ map (\(p,pris) -> drawFromDist pris p) $ zip (randomRs (0.0,1.0) stdGen) myVectors'
         bottomSeq = map overlay $ zip bottomSeq' oldSeq
         overlay (x,y) = case (withGaps,x,y) of 
                           (True,_,'-') -> '-'
                           (_,a,_)      -> a
         pLs = calcLeafPL tipLkl dist modelList
-        tipLkl = getPartial hiddenClasses AminoAcid bottomSeq
+        tipLkl | trace bottomSeq True = getPartial hiddenClasses AminoAcid bottomSeq
 
 makeSimulatedTree' withGaps seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
-        myMats :: [Matrix Double]
-        myMats = map (\x -> fst$ x dist) modelList
-        myVectors :: [[[Double]]]
-        myVectors = map toLists $ map (myMats!!) models
+        myMats = DVec.fromList $ map (DVec.fromList . toLists) $ map (\x -> fst$ x dist) modelList
+        myVectors :: [DVec.Vector [Double]]
+        myVectors = map (myMats!) models
         (r0:leftR:rightR:_) = genList stdGen 
         bottomSeqPartial :: [(Double,[Double])]
-        bottomSeqPartial = zip (randomRs (0.0,1.0) r0) (map (\(vec,base) -> vec!!base) $ zip myVectors topSeq) 
+        bottomSeqPartial = zip (randomRs (0.0,1.0) r0) (map (\(vec,base) -> vec!base) $ zip myVectors topSeq) 
         bottomSeq = map (\(p,pris) -> drawFromDist pris p) bottomSeqPartial
         left = makeSimulatedTree' withGaps seqDataType hiddenClasses leftR bottomSeq models l
         right = makeSimulatedTree' withGaps seqDataType hiddenClasses rightR bottomSeq models r
