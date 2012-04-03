@@ -158,11 +158,8 @@ main = do args <- getArgs
                                                                             let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
                                                                             let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
                                                                             print edgeQuantileMap
-                                                                            putStrLn "Here comes the xml:"
                                                                             let tempTree = annotateTreeWith edgeQuantileMap t2
-                                                                            putStrLn "Temp Tree"
-                                                                            print tempTree
-                                                                            putStr $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
+                                                                            writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
                                                                             renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
                                                                             renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-branch.pdf"
                                                                             renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
