@@ -123,9 +123,6 @@ main = do args <- getArgs
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let xml = unlines $ simplePhyloXML (annotateTreeWithNumberSwitchesSigma sigma t2)
-                                               putStrLn "Here comes the xml:"
-                                               putStr xml
                                                let stochmapF a b c d e f g = calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites a b c d e f g Nothing
                                                let stochmapT tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
                                                                     sitemap' = mapBack $ pAlignment pAln'
@@ -163,6 +160,13 @@ main = do args <- getArgs
                                                let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
+                                               let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
+                                               print edgeQuantileMap
+                                               putStrLn "Here comes the xml:"
+                                               let tempTree = annotateTreeWith edgeQuantileMap t2
+                                               putStrLn "Temp Tree"
+                                               print tempTree
+                                               putStr $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
                                                print line
                                                print line1
                                                print $ take 5 line2
@@ -189,6 +193,14 @@ discrep :: ([[Double]], [Double]) -> [[Double]]
 discrep ((x:xs),(y:ys)) = (map (\i->i-y) x):(discrep (xs,ys))
 discrep ([],[]) = []
 
+perLocationQuantile :: Int -> [[Double]] -> [Double] -> [Double]
+perLocationQuantile numQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fromIntegral . (reverseQuantile simQuantiles)) locdist where
+        quantileF d q = continuousBy medianUnbiased q numQuantile d
+        simVec = UVec.fromList $ concat simulated
+        simQuantiles = map (quantileF simVec) [0..numQuantile]
+
+
+                  
 makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double])
 makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper) where
                                         revQuantile x | trace ("XX " ++ (show x)) True = map (quantileF (revQuantileRawF x)) [0..numQuantile]
