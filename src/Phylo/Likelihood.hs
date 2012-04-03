@@ -1,3 +1,4 @@
+{-# Language ScopedTypeVariables #-}
 module Phylo.Likelihood where
 import Phylo.Alignment
 import Phylo.Tree
@@ -892,6 +893,22 @@ getAln tree = quickListAlignment names seqs where
         leaves = getLeaves tree
         names = map dName leaves
         seqs = map Phylo.Likelihood.sequence leaves
+
+
+annotateTreeWith :: [(([String],[String]),Double)] -> DNode -> DNode 
+annotateTreeWith start = annotateTreeWith' mapping where
+                                listMap :: [([String],Double)] = concatMap (\((a,b),c) -> [(sort a,c),(sort b,c)]) start
+                                mapping x = snd $ fromJust $ find ((==(sort x)) . fst) listMap
+                   
+
+annotateTreeWith' :: ([String]->Double) -> DNode -> DNode 
+annotateTreeWith' mapping (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                                                 an = annotateTreeWith' mapping
+
+annotateTreeWith' mapping n@(DINode l r bl models mats) = DINode (an l) (an r) (bl ++ [(mapping $ descendents n)]) models mats where
+                                                                an = annotateTreeWith' mapping
+
+annotateTreeWith' mapping n@(DLeaf name bl seq tip models partial) = DLeaf name (bl ++ [(mapping [name])]) seq tip models partial
 
 annotateTreeWithNumberSwitchesSigma sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
                                                                             an = annotateTreeWithNumberSwitchesSigma' sigma priors pis
