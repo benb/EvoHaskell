@@ -147,17 +147,15 @@ main = do args <- getArgs
                                                                             let ans = stochmapOrder ans' sitemap (getPriors t2) 
                                                                             simStoch' <- mapM (stochmapT lM) simulations
                                                                             let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
-                                                                            print $ map fst simStoch
-                                                                            print "OK1"
+                                                                            --print $ map fst simStoch
                                                                             let simStochDesc = map discrep simStoch
                                                                             let ansDesc = discrep ans
-                                                                            print "OK2"
                                                                             let tot x = foldr (+) (0.0) x
                                                                             let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                             let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                                             let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
                                                                             let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
-                                                                            print edgeQuantileMap
+                                                                            --print edgeQuantileMap
                                                                             let tempTree = annotateTreeWith edgeQuantileMap t2
                                                                             writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
                                                                             renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
@@ -192,7 +190,7 @@ perLocationQuantile numQuantile simulated locdist = map ((/ (fromIntegral numQua
                   
 makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double])
 makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper) where
-                                        revQuantile x | trace ("XX " ++ (show x)) True = map (quantileF (revQuantileRawF x)) [0..numQuantile]
+                                        revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
                                         revQuantileRawF x = UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
 
                                         quantileF d q = continuousBy medianUnbiased q numQuantile d
@@ -242,8 +240,8 @@ stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[
 stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
-                                                fixProc pr x | trace ("pr " ++ (take 50 $ show pr) ++ (take 50 $ show x)) True  = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
-                                                fixProc2 pr xs | trace ("pr2 " ++ (take 50 $ show pr)) True = (map $ fixProc pr) (transpose xs)
+                                                fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
+                                                fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
 
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()

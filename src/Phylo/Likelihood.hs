@@ -463,7 +463,8 @@ setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newl
         newleft = DINode l1 r1 x model partial'
         pl' = calcRootPL newleft m r 
 
-optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+--optLeftBL tree  = traceShow ("OptBL " ++ (show best) ++ "->" ++ (show $ logLikelihood $ setLeftBL tree best)) $ setLeftBL tree best where
+optLeftBL tree  = setLeftBL tree best where
                         (DTree l _ _ _ _ _ _ ) = tree
                         best = case l of 
                                 (DINode _ _ [param] _ _) -> (safeGoldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
