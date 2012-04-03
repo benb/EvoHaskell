@@ -27,6 +27,7 @@ import Phylo.Graphics.Plotting
 import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
 import Control.DeepSeq
 import Data.Char
+import Control.Parallel.Strategies
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -151,8 +152,8 @@ main = do args <- getArgs
                                                                                                               myModel = thmmPerBranchModel (cats+1) wagS piF
                                                                                     mapM_ (forkIO . opt mVar) simulations'
                                                                                     replicateM (length simulations') $ takeMVar mVar 
-                                                                      BranchOpt -> return $ map optBLDFull0 simulations'
-                                                                      QuickBranchOpt -> return $ map optBLDFull0 simulations'
+                                                                      BranchOpt -> return $ parMap rseq optBLDFull0 simulations'
+                                                                      QuickBranchOpt -> return $ parMap rseq optBLDFull0 simulations'
                                                                       NoOpt -> return $ simulations'
                                                simStoch' <- mapM stochmapT simulations
                                                let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
