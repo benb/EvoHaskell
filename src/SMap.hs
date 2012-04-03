@@ -4,6 +4,7 @@ import System.Console.GetOpt
 import Phylo.Alignment
 import Data.List
 import Control.Monad
+import Control.Concurrent
 import Phylo.Tree
 import Phylo.Data
 import Phylo.Likelihood
@@ -141,11 +142,15 @@ main = do args <- getArgs
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
                                                simulations :: [DNode] <- case optBoot of 
-                                                                      FullOpt -> (liftM (map fst)) $ mapM (\mytree -> optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])) simulations' where
-                                                                                       lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                       upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
-                                                                                       numModels = 1
-                                                                                       myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                      FullOpt -> do mVar <- newEmptyMVar
+                                                                                    let opt mv mytree = do ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
+                                                                                                           putMVar mv $ fst ans where
+                                                                                                              lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
+                                                                                                              upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
+                                                                                                              numModels = 1
+                                                                                                              myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                                    mapM_ (forkIO . opt mVar) simulations'
+                                                                                    replicateM (length simulations') $ takeMVar mVar 
                                                                       BranchOpt -> return $ map optBLDFull0 simulations'
                                                                       QuickBranchOpt -> return $ map optBLDFull0 simulations'
                                                                       NoOpt -> return $ simulations'

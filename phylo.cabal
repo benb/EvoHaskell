@@ -32,7 +32,7 @@ Executable smap
         C-sources: src/Phylo/nlopt_c.c
         Main-Is: SMap.hs
         HS-Source-Dirs: src
-        ghc-options:        -O2 -rtsopts
+        ghc-options:        -O2 -rtsopts -threaded
         extra-libraries: iconv nlopt stochmap
 library
         C-sources: src/Phylo/nlopt_c.c
