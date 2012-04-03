@@ -132,13 +132,19 @@ main = do args <- getArgs
                                                let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
                                                simulations :: [DNode] <- case optBoot of 
                                                                       FullOpt -> do mVar <- newEmptyMVar
-                                                                                    let opt mv mytree = do ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
-                                                                                                           putMVar mv $ fst ans where
-                                                                                                              lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                                              upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
-                                                                                                              numModels = 1
-                                                                                                              myModel = thmmPerBranchModel (cats+1) wagS piF
-                                                                                    mapM_ (forkIO . opt mVar) simulations'
+                                                                                    threads<-getNumCapabilities
+                                                                                    stagger <- replicateM threads newEmptyMVar
+                                                                                    mapM_ (\x->putMVar x ()) stagger
+                                                                                    let staggerVars = concat $ repeat stagger
+                                                                                    let opt mv (mytree,hv) = do gottheball<-takeMVar hv
+                                                                                                                ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
+                                                                                                                putMVar hv ()
+                                                                                                                putMVar mv $ fst ans where
+                                                                                                                  lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
+                                                                                                                  upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
+                                                                                                                  numModels = 1
+                                                                                                                  myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                                    mapM_ (forkIO . opt mVar) $ zip simulations' staggerVars
                                                                                     replicateM (length simulations') $ takeMVar mVar 
                                                                       BranchOpt -> return $ parMap rseq optBLDFull0 simulations'
                                                                       QuickBranchOpt -> return $ parMap rseq optBLDFull0 simulations'
