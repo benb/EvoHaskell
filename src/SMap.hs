@@ -5,6 +5,7 @@ import Phylo.Alignment
 import Data.List
 import Control.Monad
 import Control.Concurrent
+import qualified GHC.Conc.Sync as Sync
 import Phylo.Tree
 import Phylo.Data
 import Phylo.Likelihood
@@ -28,6 +29,7 @@ import Graphics.Rendering.Chart.Renderable (renderableToPDFFile)
 import Control.DeepSeq
 import Data.Char
 import Control.Parallel.Strategies
+import Data.Time.Clock
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -132,22 +134,32 @@ main = do args <- getArgs
                                                let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
                                                simulations :: [DNode] <- case optBoot of 
                                                                       FullOpt -> do mVar <- newEmptyMVar
-                                                                                    threads<-getNumCapabilities
+                                                                                    putStrLn "FULL OPT"
+                                                                                    let threads = Sync.numCapabilities
                                                                                     stagger <- replicateM threads newEmptyMVar
                                                                                     mapM_ (\x->putMVar x ()) stagger
                                                                                     let staggerVars = concat $ repeat stagger
-                                                                                    let opt mv (mytree,hv) = do gottheball<-takeMVar hv
-                                                                                                                ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
-                                                                                                                putMVar hv ()
-                                                                                                                putMVar mv $ fst ans where
-                                                                                                                  lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                                                  upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
-                                                                                                                  numModels = 1
-                                                                                                                  myModel = thmmPerBranchModel (cats+1) wagS piF
-                                                                                    mapM_ (forkIO . opt mVar) $ zip simulations' staggerVars
+                                                                                    let opt mv (mytree,hv,id) = do gottheball<-takeMVar hv
+                                                                                                                   startTime <- getCurrentTime
+                                                                                                                   putStrLn $ "Started " ++ (show id) ++ " " ++ (show startTime)
+                                                                                                                   hFlush stdout
+                                                                                                                   ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
+                                                                                                                   putMVar hv ()
+                                                                                                                   putMVar mv $ fst ans 
+                                                                                                                   endTime <- getCurrentTime
+                                                                                                                   let diffTime = endTime `diffUTCTime` startTime
+                                                                                                                   putStrLn $ "Time taken " ++ (show (diffTime)) 
+                                                                                                                   hFlush stdout where
+                                                                                                                     lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
+                                                                                                                     upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
+                                                                                                                     numModels = 1
+                                                                                                                     myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                                    mapM_ (forkIO . opt mVar) $ zip3 simulations' staggerVars [0..]
                                                                                     replicateM (length simulations') $ takeMVar mVar 
-                                                                      BranchOpt -> return $ parMap rseq optBLDFull0 simulations'
-                                                                      QuickBranchOpt -> return $ parMap rseq optBLDFull0 simulations'
+                                                                      BranchOpt -> do putStrLn "BRANCH OPT"
+                                                                                      return $ parMap rseq optBLDFull0 simulations'
+                                                                      QuickBranchOpt -> do putStrLn "QUICK BRANCH OPT (todo)"
+                                                                                           return $ parMap rseq optBLDFull0 simulations'
                                                                       NoOpt -> return $ simulations'
                                                let outputMat (name,lM) = do ans' <- stochmapT lM t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
                                                                             let ans = stochmapOrder ans' sitemap (getPriors t2) 
