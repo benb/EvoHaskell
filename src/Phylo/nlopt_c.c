@@ -28,7 +28,43 @@ int opt_cobyla(double xtol, double *step_size, double *params, unsigned np, doub
 int opt_mma(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
         return call_nlopt(NLOPT_LD_MMA,xtol,step_size,params,np,func,lower,upper);
 }
-
+int opt_slsqp(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_SLSQP,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_newton(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_TNEWTON_PRECOND_RESTART,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_var1(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_VAR1,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_var2(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_VAR2,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_lbfgs(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_LBFGS,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_sbplx(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_SBPLX,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_neldermead(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_NELDERMEAD,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_praxis(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_PRAXIS,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_newuoa(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LN_NEWUOA_BOUND,xtol,step_size,params,np,func,lower,upper);
+}
+/*
+ * NLOPT_LD_TNEWTON_PRECOND_RESTART
+ * NLOPT_LD_VAR2
+ * NLOPT_LD_VAR1
+ * NLOPT_LD_LBFGS
+ * NLOPT_LN_SBPLX
+ * NLOPT_LN_NELDERMEAD
+ * NLOPT_LN_PRAXIS
+ * NLOPT_LN_NEWUOA_BOUND
+ *
 /*int main(int argc, char* argv[]){*/
         /*double lb[2] = { -5.12, -5 }; [> lower bounds <]*/
         /*double ub[2] = { 5, 5};*/

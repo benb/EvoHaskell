@@ -675,7 +675,8 @@ thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s p
 thmmPerBranch numCat pi s priors alpha paramList | trace ("thmmpb " ++ (show paramList)) False = undefined
 
 
-
+loggedFuncGeneric :: (Show a) => (a->b) -> (a->b)
+loggedFuncGeneric f x = trace (show x) (f x)
 
 loggedFunc :: (Show a) => (a -> Double) -> (a -> Double)
 loggedFunc f | trace "LOGGING ON" True = f2 where
@@ -730,7 +731,8 @@ bfgsOpt l u f p = fst $ maximizeDG l u VectorBFGS2 1e-4 100000 0.1 1e-4 f p
 bobyqaOpt :: [Double] -> [Maybe Double] -> [Maybe Double] -> ([Double] -> (Double,Maybe [Double])) -> [Double] -> IO ([Double],Int)
 bobyqaOpt ss l u f p = bobyqa ss 1E-4 p (invert2 f) l u
 cobylaOpt ss l u f p = cobyla ss 1E-4 p (invert2 f) l u
-
+mmaOpt ss l u f p = mma ss 1E-4 p (invert2 f) l u
+slsqpOpt ss l u f p = slsqp ss 1E-4 p (invert2 f) l u
 
 getSingleDimensional :: ([Double]->a) -> [Double] -> [Double->a]
 getSingleDimensional f x = map (\i x2 -> f (replace i [x2] x)) $ map fst $ zip [0..] x
@@ -748,14 +750,18 @@ getFuncT1 priors model tree params = (newtree,funcs) where
 -- | bsParams are set by a mapping (DNode -> Int) 
 getFuncT1A  :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> [Double] -> (DNode,[Double->DNode])
 getFuncT1A priors mapping (0,0) model tree params = getFuncT1 priors model tree params
-getFuncT1A priors mapping (paramsPerBranch,paramCats) model tree params = (newtree,funcs) where
+getFuncT1A priors mapping numBSParam model tree params = (newTree,funcs) where
+        f = getFuncT1A' priors mapping numBSParam model tree 
+        newTree = f params
+        funcs = getSingleDimensional (loggedFuncGeneric f) params
+
+getFuncT1A' priors mapping (paramsPerBranch,paramCats) model tree params = newtree where
         newtree = f params' 
         f x = addModelFx t2 (model x) priors where
                 t2 = setBLMapped 1 tree getParamF 
         perBranchParams = take paramCats $ splitLists paramsPerBranch params
         params' = drop (paramsPerBranch * paramCats) params
         getParamF node = (perBranchParams !! (mapping node))
-        funcs = getSingleDimensional f params'
 
 getParamsT1 params tree = params
 
@@ -774,7 +780,7 @@ getParamsT2 params tree = (map head $ getBL' tree []) ++  params
 
 -- branchLengths, then bsParams, then other params
 getFuncT3 priors mapping (0,0) model tree params = getFuncT2 priors model tree params
-getFuncT3 priors mapping numBSParam model tree params = (newtree,funcs) where
+getFuncT3 priors mapping numBSParam model tree params | trace ("getFuncT3 " ++ (show params)) True = (newtree,funcs) where
         (tree',remainder) = setBL' (map (:[]) params) tree
         remainder' = concat remainder
         (newtree,funcsPerParam) = getFuncT1A priors mapping numBSParam model tree' remainder'
@@ -790,40 +796,58 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
                  
 data IterType = Full | BL | Params deriving (Eq, Show)
 
-optBSParamsBLIO numBSParam mapping initialStepSize = optWithBSIO' [] 1E-4 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
+optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-4 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
+getDeriv (curr,f,x,l,u) = getDeriv' 1E-9 curr f x l u
 
+getDeriv' stepSize curr f x l u | trace ("getting deriv for " ++ (show x) ++ " " ++ (show [l,u])) False = undefined 
+getDeriv' stepSize curr f x l u = case (u,l) of 
+                                  (Just a, Just b) -> go (min a (x+stepSize)) (max b (x-stepSize))
+                                  (Just a, Nothing) -> go (min a (x+stepSize)) (x-stepSize)
+                                  (Nothing,Just b) -> go (x+stepSize) (max b (x-stepSize))
+                                  (Nothing,Nothing) -> go (x+stepSize) (x-stepSize) 
+                                  where
+                                        go a b = ((f a) - (f b))/(a-b)
 
-optWithBSIO' :: [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> IO (DNode,[Double])
-optWithBSIO' iterations cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree startParams = do 
+optWithBSIO' :: NLOptMethod -> [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> IO (DNode,[Double])
+optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree startParams = do 
      ans <- case iterations of
                 ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) && stepSizeMet -> return (tree,startParams) --stop
-                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
+                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
+--                           (bestParams',err) <- slsqpOpt stepSize lower upper f (enforceBounds lower upper startParams)
+--                           let tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
+--                           let lkl = logLikelihood tree'
+--                           optWithBSIO' ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where -- Opt Params
+--                                myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
+--                                f x = trace ((show x) ++ " -> " ++ (show ans) ++ "\n" ++ (show derivs)) (ans,Just derivs) where
+--                                        (outTree,outFuncs) = myFunc x
+--                                        ans = logLikelihood outTree
+--                                        derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
                 list@((x,BL):xs) -> do 
-                           (bestParams',err) <- bobyqaOpt stepSize lower upper f (enforceBounds lower upper startParams)
-                           let tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
-                           let lkl = logLikelihood tree'
-                           optWithBSIO' ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where -- Opt Params
-                                myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
-                                f x = (logLikelihood $ fst $ myFunc x,Nothing)
-                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*1000)) && (t /= Full) -> do 
-                           let myBL = map head $ getBL' tree [] 
-                           let numBL = length myBL
-                           let addBL p = myBL ++ startParams
-                           let dropBL p = drop numBL p
-                           let lower' = (replicate numBL $ Just 1E-6) ++ lower
-                           let upper' = (replicate numBL $ Just 10.0) ++ upper
+--                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*1000)) && (t /= Full) -> do 
+                           putStrLn ("HELLO X " ++ (show startParams))
                            let stepSize' = (replicate numBL $ 0.01) ++ (map (/2) stepSize)
                            {-let startParams' = enforceBounds lower' upper' (addBL startParams)-}
                            let startParams' = addBL startParams
-                           (bestParams',err) <- bobyqaOpt stepSize' lower' upper' f startParams'
+                           putStrLn ("Start " ++ (show (fst $ f startParams')))
+                           (bestParams',err) <- method stepSize' 1E-4 startParams' f lower' upper' --f startParams'
                            --let (bestParams',err) = output
                            let (tree',_) = getFuncT3 priors (fromJust mapping) numBSParam model tree bestParams'
                            let lkl = logLikelihood tree'
-                           optWithBSIO' ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
+                           optWithBSIO' method ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
                                 myFunc = getFuncT3 priors (fromJust mapping) numBSParam model tree
-                                f x = (logLikelihood $ fst $ myFunc x,Nothing)
-                list -> trace "BL OPT" $ optWithBSIO' ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
-                                tree' = optBLDFull0 $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams
+                                f x = trace ((show x) ++ " -> " ++ (show ans)) (ans,Just derivs) where
+                                        (outTree,outFuncs) = myFunc x
+                                        ans = logLikelihood outTree
+                                        derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower' upper'
+                                myBL = map head $ getBL' tree [] 
+                                numBL = length myBL
+                                lower' = (replicate numBL $ Just 1E-6) ++ lower
+                                upper' = (replicate numBL $ Just 10.0) ++ upper
+                                addBL p = myBL ++ startParams
+                                dropBL p = drop numBL p
+                list -> trace "BL OPT" $ optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
+                                startTree = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams                                            
+                                tree' | trace ("START BL " ++ (show startTree) ++ "\n" ++ (show $ logLikelihood startTree)) True = optBLDFull0 startTree                                       
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
      return ans where

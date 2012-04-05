@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns,ScopedTypeVariables #-}
 import System.Environment (getArgs)
 import System.Console.GetOpt
+import System.Exit
 import Phylo.Alignment
 import Data.List
 import Control.Monad
@@ -30,10 +31,12 @@ import Control.DeepSeq
 import Data.Char
 import Control.Parallel.Strategies
 import Data.Time.Clock
+import Phylo.NLOpt
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt | BranchOpt | QuickBranchOpt | NoOpt deriving Show
+
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree"
@@ -41,7 +44,33 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
           , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
           , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
+          , Option [] ["thmm"] (OptArg thmmModelR "init params") "Use THMM model"
+          , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data"
             ]
+
+thmmModelR arg opt | trace "THMM found" True  = case arg of 
+                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 1.0 1.0 0.1 }
+                      Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
+                                        [a,b,c] -> return opt { optModel = Thmm a b c }
+                                        _       -> error $ "Can't parse three doubles from " ++ args
+
+optAlgR arg opt = case arg of 
+                        Nothing -> return opt {optAlg = OptMethod slsqp}
+                        Just name -> return opt {optAlg = OptMethod met} where 
+                                        met = case (map toLower name) of 
+                                              "bobyqa" -> bobyqa
+                                              "cobyla" -> cobyla
+                                              "mma" -> mma
+                                              "slsqp" -> slsqp
+                                              "newton" -> newton
+                                              "var1" -> var1
+                                              "var2" -> var2
+                                              "lbfgs" -> lbfgs
+                                              "sbplx" -> sbplx
+                                              "neldermead" -> neldermead
+                                              "praxis" -> praxis
+                                              "newuoa" -> newuoa
+                                              _ -> error $ "Can't parse optimisation method " ++ name
 
 data Options = Options  {
         optAln  :: String,
@@ -49,7 +78,9 @@ data Options = Options  {
         optNumCats :: Int,
         optBootCount :: Int,
         optSeed :: Maybe Int,
-        optLevel :: OptLevel
+        optLevel :: OptLevel,
+        optModel :: Model,
+        optAlg :: OptAlg
 } deriving Show
 
 defaultOptions :: Options
@@ -59,8 +90,14 @@ defaultOptions = Options {
         optNumCats = 4,
         optBootCount = 10,
         optSeed = Nothing,
-        optLevel = BranchOpt
+        optLevel = BranchOpt,
+        optModel = Thmm 1.0 1.0 0.1,
+        optAlg = OptNone
 }
+
+-- alpha sigma pInv | alpha
+data Model = Thmm Double Double Double | Ras Double deriving Show
+data OptAlg = OptNone | OptMethod NLOptMethod deriving Show
 
 optAlnR arg opt = return opt { optAln = arg }
 optTreeR arg opt = return opt { optTree = arg }
@@ -86,7 +123,9 @@ main = do args <- getArgs
                   optNumCats = cats,
                   optBootCount = numSim,
                   optSeed = seed,
-                  optLevel = optBoot
+                  optLevel = optBoot,
+                  optModel = modelParams,
+                  optAlg = optMethod
           } = opts
           print seed
           print numSim
@@ -101,13 +140,28 @@ main = do args <- getArgs
                                     return Nothing
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
-                (Just a,Right t,params)->   do let alpha:sigma:priorZero:[] = map read $ take 3 params
+                (Just a,Right t,params)->   do let (alpha',sigma',priorZero') = case modelParams of 
+                                                                                 Thmm a b c -> (a,b,c)
                                                let pAln = pAlignment a
                                                let (nSite,nCols,multiplicites) = getAlnData pAln where
                                                    getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
                                                let piF = fromList $ safeScaledAAFrequencies a
-                                               let model = thmmModel (cats+1) wagS piF [priorZero,alpha,sigma]
-                                               let t2 = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
+                                               let model = thmmModel (cats+1) wagS piF [priorZero',alpha',sigma']
+                                               let t2' = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
+                                               (t2,priorZero,alpha,sigma) <- case (optMethod,t2',priorZero',alpha',sigma') of 
+                                                                                 (OptNone,a1,a2,a3,a4) -> do putStrLn "NOT PERFORMING OP"
+                                                                                                             return (a1,a2,a3,a4)
+                                                                                 (OptMethod method,a1,a2,a3,a4) -> do putStrLn "PERFORMING OPT"
+                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([a2,a3,a4]) 
+                                                                                                                      print treeans
+                                                                                                                      print (a',b',c')
+                                                                                                                      print (logLikelihood treeans)
+                                                                                                                      exitSuccess
+                                                                                                                      return (treeans,a',b',c') where
+                                                                                                                         lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
+                                                                                                                         upper = (replicate numModels Nothing) ++ [Just 0.99,Just 200.0]                                                                                                                  
+                                                                                                                         numModels = 1
+                                                                                                                         myModel = thmmPerBranchModel (cats+1) wagS piF
                                                putStrLn "START"
                                                print t2
                                                let a = map (fst . leftSplit) $ getAllF t2
@@ -153,7 +207,7 @@ main = do args <- getArgs
                                                                                                                    startTime <- getCurrentTime
                                                                                                                    putStrLn $ "Started " ++ (show id) ++ " " ++ (show startTime)
                                                                                                                    hFlush stdout
-                                                                                                                   ans <- optBSParamsBLIO (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
+                                                                                                                   ans <- optBSParamsBLIO slsqp (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
                                                                                                                    putMVar hv ()
                                                                                                                    putMVar mv $ fst ans 
                                                                                                                    endTime <- getCurrentTime
@@ -161,7 +215,7 @@ main = do args <- getArgs
                                                                                                                    putStrLn $ "Time taken " ++ (show (diffTime)) 
                                                                                                                    hFlush stdout where
                                                                                                                      lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                                                     upper = (replicate numModels Nothing) ++ [Just 0.99,Nothing]                                                                                                                  
+                                                                                                                     upper = (replicate numModels Nothing) ++ [Just 0.99,Just 200.0]                                                                                                                  
                                                                                                                      numModels = 1
                                                                                                                      myModel = thmmPerBranchModel (cats+1) wagS piF
                                                                                     mapM_ (forkIO . opt mVar) $ zip3 simulations' staggerVars [0..]
@@ -251,7 +305,6 @@ normalise list = map ( / total) list where
                  total = foldr (+) 0.0 list
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
-optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
 
 trim = f . f where 
    f = reverse . dropWhile isSpace
