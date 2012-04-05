@@ -97,6 +97,10 @@ main = do args <- getArgs
           aln' <- parseAlignmentFile parseUniversal aln                                                                                                       
           tree' <- (liftM readBiNewickTree) (readFile tree)                                                                                                    
           output <- case (aln',tree',nonOpts) of 
+                (Nothing,_,_) -> do putStrLn "Failed to parse alignment"
+                                    return Nothing
+                (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
+                                     return Nothing
                 (Just a,Right t,params)->   do let alpha:sigma:priorZero:[] = map read $ take 3 params
                                                let pAln = pAlignment a
                                                let (nSite,nCols,multiplicites) = getAlnData pAln where
@@ -104,6 +108,12 @@ main = do args <- getArgs
                                                let piF = fromList $ safeScaledAAFrequencies a
                                                let model = thmmModel (cats+1) wagS piF [priorZero,alpha,sigma]
                                                let t2 = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
+                                               putStrLn "START"
+                                               print t2
+                                               let a = map (fst . leftSplit) $ getAllF t2
+                                               let b = getLeftSplit t2
+                                               print $ "OK? " ++ (show (a==b))
+                                               putStrLn "END"
                                                let nState = (cats+1)*20
                                                let nProc = 1 {-- fixme --}
                                                let pi_i = map toList (snd model) 

@@ -18,11 +18,15 @@ int call_nlopt(nlopt_algorithm alg, double xtol, double *step_size, double *para
         nlopt_destroy(opt);
         return retval;
 }
+
 int opt_bobyqa(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
         return call_nlopt(NLOPT_LN_BOBYQA,xtol,step_size,params,np,func,lower,upper);
 }
 int opt_cobyla(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
         return call_nlopt(NLOPT_LN_COBYLA,xtol,step_size,params,np,func,lower,upper);
+}
+int opt_mma(double xtol, double *step_size, double *params, unsigned np, double (*func) (unsigned,const double*,double*,void*),double *lower, double *upper){
+        return call_nlopt(NLOPT_LD_MMA,xtol,step_size,params,np,func,lower,upper);
 }
 
 /*int main(int argc, char* argv[]){*/
