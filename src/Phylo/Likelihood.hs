@@ -20,6 +20,7 @@ import Debug.Trace
 import Phylo.Data
 import System.Random
 import Numeric.GSL.Differentiation
+import Numeric.GSL.OneDimensionalMinimization
 import qualified Data.Vector as DVec
 import Data.Vector ((!))
 
@@ -517,8 +518,10 @@ getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 
 optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ bestTree where
                                 startBL = getLeftBL tree
+                                startB = head $ drop val startBL
                                 startLL = logLikelihood tree
-                                b = goldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
+                                f = (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
+                                b = brent f 1E-4 50.0 (min (max 1E-4 startB) 50.0) 1E-3 1E-3
                                 best = replace val [b] startBL
                                 bestTree' = setLeftBL tree best 
                                 --protect from golden section screw-ups
@@ -791,7 +794,7 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
 data IterType = Full | BL | Params deriving (Eq, Show)
 
 optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-4 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
-getDeriv (curr,f,x,l,u) = getDeriv' 1E-9 curr f x l u
+getDeriv (curr,f,x,l,u) = getDeriv' 1E-6 curr f x l u
 
 --getDeriv' stepSize curr f x l u | trace ("getting deriv for " ++ (show x) ++ " " ++ (show [l,u])) False = undefined 
 getDeriv' stepSize curr f x l u = case (u,l) of 
@@ -807,6 +810,8 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
      ans <- case iterations of
                 ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) && stepSizeMet -> return (tree,startParams) --stop
                 ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
+                --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && stepSizeMet -> return (tree,startParams) --stop
+                --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 list@((x,BL):[]) -> do 
                            (bestParams',err) <- method (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
                            let tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
