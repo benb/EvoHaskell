@@ -65,7 +65,7 @@ nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (real
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 
                                                   stepSize' <- newArray $ map realToFrac stepSize
                                                   let np = trace ("Start params " ++ (show params) ++ " np " ++ (show (length params))) $ length params
-                                                  let f' a b c d = do (ans,deriv)<-(liftM f) (fmap (map realToFrac) $ peekArray np b)
+                                                  let f' a b c d = do (ans,deriv)<-(liftM (invert2 f)) (fmap (map realToFrac) $ peekArray np b)
                                                                       case c of 
                                                                             x | x==nullPtr -> return ()
                                                                             ptr -> pokeArray ptr $ map realToFrac $ fromJust deriv
@@ -77,3 +77,11 @@ nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (real
                                                   freeHaskellFunPtr f''
                                                   return (ans,retCode)
 
+                                                                                                                                                              
+-- | invert a function                                                                                                                                        
+invert f = (*(-1)). f                                                                                                                                         
+-- | invert both a function and a set of gradient                                                                                                             
+invert2 f x = case (f x) of                                                                                                                                   
+                (a,Just b)->(a*(-1),Just $ map (*(-1)) b)                                                                                                     
+                (a,Nothing)->(a*(-1),Nothing)                                                                                                                 
+                                                         

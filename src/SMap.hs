@@ -49,7 +49,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
             ]
 
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
-                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 1.0 1.0 0.1 }
+                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 1.0 0.1 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
                                         [a,b,c] -> return opt { optModel = Thmm a b c }
                                         _       -> error $ "Can't parse three doubles from " ++ args
@@ -91,7 +91,7 @@ defaultOptions = Options {
         optBootCount = 10,
         optSeed = Nothing,
         optLevel = BranchOpt,
-        optModel = Thmm 1.0 1.0 0.1,
+        optModel = Thmm 1.0 0.1 1.0,
         optAlg = OptNone
 }
 
@@ -140,7 +140,7 @@ main = do args <- getArgs
                                     return Nothing
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
-                (Just a,Right t,params)->   do let (alpha',sigma',priorZero') = case modelParams of 
+                (Just a,Right t,params)->   do let (sigma',priorZero',alpha') = case modelParams of 
                                                                                  Thmm a b c -> (a,b,c)
                                                let pAln = pAlignment a
                                                let (nSite,nCols,multiplicites) = getAlnData pAln where
@@ -148,18 +148,18 @@ main = do args <- getArgs
                                                let piF = fromList $ safeScaledAAFrequencies a
                                                let model = thmmModel (cats+1) wagS piF [priorZero',alpha',sigma']
                                                let t2' = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
-                                               (t2,priorZero,alpha,sigma) <- case (optMethod,t2',priorZero',alpha',sigma') of 
-                                                                                 (OptNone,a1,a2,a3,a4) -> do putStrLn "NOT PERFORMING OP"
-                                                                                                             return (a1,a2,a3,a4)
-                                                                                 (OptMethod method,a1,a2,a3,a4) -> do putStrLn "PERFORMING OPT"
-                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([a2,a3,a4]) 
+                                               (t2,priorZero,alpha,sigma) <- case optMethod of 
+                                                                                 OptNone                        -> do putStrLn "NOT PERFORMING OP"
+                                                                                                                      return (t2',priorZero',alpha',sigma')
+                                                                                 (OptMethod method)             -> do putStrLn "PERFORMING OPT"
+                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([sigma',priorZero',alpha'])
                                                                                                                       print treeans
                                                                                                                       print (a',b',c')
                                                                                                                       print (logLikelihood treeans)
                                                                                                                       exitSuccess
                                                                                                                       return (treeans,a',b',c') where
-                                                                                                                         lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                                                         upper = (replicate numModels Nothing) ++ [Just 0.99,Just 200.0]                                                                                                                  
+                                                                                                                         lower = (replicate numModels $ Just 0.01) ++ [Just 0.01,Just 0.1]                                                                                                           
+                                                                                                                         upper = (replicate numModels $ Just 500.0) ++ [Just 0.99,Just 200.0]                                                                                                                  
                                                                                                                          numModels = 1
                                                                                                                          myModel = thmmPerBranchModel (cats+1) wagS piF
                                                putStrLn "START"
