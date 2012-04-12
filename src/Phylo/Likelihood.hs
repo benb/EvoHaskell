@@ -5,7 +5,7 @@ import Phylo.Tree
 import Phylo.Matrix
 import Phylo.Opt
 import Phylo.NLOpt
-import Numeric.LinearAlgebra ((<>),(<.>),scale,mul,constant,diag)
+import Numeric.LinearAlgebra ((<>),(<.>),scale,mul,constant,diag,kronecker,add,ident)
 import Data.Packed.Matrix
 import Data.Packed.Vector
 import Data.List
@@ -23,6 +23,7 @@ import Numeric.GSL.Differentiation
 import Numeric.GSL.OneDimensionalMinimization
 import qualified Data.Vector as DVec
 import Data.Vector ((!))
+import Numeric.LinearAlgebra.LAPACK
 
 
 -- |Combine two sets of partial likelihoods along two branches
@@ -663,12 +664,32 @@ thmmPerBranchModel numCat s pi list = error $ "Fail " ++ (show list)
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
 thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> BranchModel
-thmm numCat pi s priors alpha sigma = (\x->(standardpT (eigQ (thmmQ numCat pi s priors alpha sigma) fullPi) x,mat)) where
+thmm numCat pi s priors alpha sigma = (\x->(standardpT (eigQ mat fullPi) x,mat)) where
                                                mat = thmmQ numCat pi s priors alpha sigma
+                                               --mat2 = thmmQ2 numCat pi s priors alpha sigma
                                                fullPi = makeFullPi priors pi
 
+
+     
+--thmmQ :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> (Matrix Double,(Matrix Double, Vector Double, Matrix Double))
 thmmQ :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
-thmmQ numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where 
+thmmQ numCat pi s priors alpha sigma = trace "MATCALC" $ (matDr `kronecker` matM) `add` (matG `kronecker` matIm) where 
+                                        matM = normQ (makeQ s pi) pi
+                                        matDr = diag $ fromList $ map (*factor) ((gamma (numCat -1) alpha) ++ [0.0])
+                                        factor = 1.0 / (1.0 - (last priors))                                                                                                                                                                  
+                                        matG = makeQ sigmaMat $ fromList priors
+                                        sigmaMat = diagRect sigma (fromList $ replicate numCat 0.0) numCat numCat 
+                                        matIm = diag pi --ident size
+                                        size = cols s
+                                        --(lambdaQ,rEigQ) = eigS matM
+                                        --e = map (\lambda -> eigS (matG + (scale lambda matDr))) $ toList lambdaQ
+                                        --kroneckerVec a b = head $ toLists $ kronecker (asRow a) (asRow b)
+                                        --e2f (a,b) c = map (\(x,y) -> (x,y `kroneckerVec` c)) $ zip3 (toList a, rows b)
+
+
+
+thmmQ2 :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
+thmmQ2 numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where 
                                         subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats 
                                         qMats = (map (\(i,mat) -> setRate i mat pi) $ zip (map (*factor) $ gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi) ++ [(zeroQMat (rows s))]
                                         factor = 1.0 / (1.0 - (last priors))
