@@ -55,7 +55,7 @@ thmmModelR arg opt | trace "THMM found" True  = case arg of
                                         _       -> error $ "Can't parse three doubles from " ++ args
 
 optAlgR arg opt = case arg of 
-                        Nothing -> return opt {optAlg = OptMethod slsqp}
+                        Nothing -> return opt {optAlg = OptMethod var2}
                         Just name -> return opt {optAlg = OptMethod met} where 
                                         met = case (map toLower name) of 
                                               "bobyqa" -> bobyqa
@@ -152,11 +152,10 @@ main = do args <- getArgs
                                                                                  OptNone                        -> do putStrLn "NOT PERFORMING OP"
                                                                                                                       return (t2',priorZero',alpha',sigma')
                                                                                  (OptMethod method)             -> do putStrLn "PERFORMING OPT"
-                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([sigma',priorZero',alpha'])
+                                                                                                                      (treeans,[b',c',a']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([sigma',priorZero',alpha'])
                                                                                                                       print treeans
                                                                                                                       print (a',b',c')
                                                                                                                       print (logLikelihood treeans)
-                                                                                                                      exitSuccess
                                                                                                                       return (treeans,a',b',c') where
                                                                                                                          lower = (replicate numModels $ Just 0.01) ++ [Just 0.01,Just 0.1]                                                                                                           
                                                                                                                          upper = (replicate numModels $ Just 500.0) ++ [Just 0.99,Just 200.0]                                                                                                                  
