@@ -2,7 +2,7 @@ module Phylo.Opt (safeGoldenSection,goldenSection,boundedFunction) where
 import Debug.Trace
 import Data.Maybe
 import Data.List
-import Numeric.GSL.Minimization
+--import Numeric.GSL.Minimization
 
 phi = (1+sqrt(5))/2
 resphi = 2 - phi
