@@ -664,7 +664,8 @@ thmmPerBranchModel numCat s pi list = error $ "Fail " ++ (show list)
 quickThmm numCat aln tree pi s [priorZero,alpha,sigma] = qdLkl numCat [1.0] AminoAcid aln tree (thmmModel numCat s pi) [priorZero,alpha,sigma] 
                                                         
 thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> BranchModel
-thmm numCat pi s priors alpha sigma = (\x->(standardpT (eigQ mat fullPi) x,mat)) where
+thmm numCat pi s priors alpha sigma = trace "THMM" $ (\x->(standardpT eigM x,mat)) where
+                                               eigM = eigQ mat fullPi
                                                mat = thmmQ numCat pi s priors alpha sigma
                                                --mat2 = thmmQ2 numCat pi s priors alpha sigma
                                                fullPi = makeFullPi priors pi
@@ -773,15 +774,15 @@ getFuncT1 priors model tree params = (newtree,funcs) where
 -- | function that sets bsParams then parameters 
 -- | bsParams are set by a mapping (DNode -> Int) 
 getFuncT1A  :: [Double] -> (DNode -> Int) -> (Int,Int) -> ModelF -> DNode -> [Double] -> (DNode,[Double->DNode])
-getFuncT1A priors mapping (0,0) model tree params = getFuncT1 priors model tree params
+getFuncT1A priors mapping (0,_) model tree params = getFuncT1 priors model tree params
 getFuncT1A priors mapping numBSParam model tree params = (newTree,funcs) where
         f = getFuncT1A' priors mapping numBSParam model tree 
         newTree = f params
         funcs = getSingleDimensional (loggedFuncGeneric f) params
 
 getFuncT1A' priors mapping (paramsPerBranch,paramCats) model tree params = newtree where
-        newtree = f params' 
-        f x = addModelFx t2 (model x) priors where
+        modelx = model params'
+        newtree = addModelFx t2 modelx priors where
                 t2 = setBLMapped 1 tree getParamF 
         perBranchParams = take paramCats $ splitLists paramsPerBranch params
         params' = drop (paramsPerBranch * paramCats) params
@@ -803,7 +804,7 @@ getFuncT2 priors model tree params = (newtree,funcs) where
 getParamsT2 params tree = (map head $ getBL' tree []) ++  params
 
 -- branchLengths, then bsParams, then other params
-getFuncT3 priors mapping (0,0) model tree params = getFuncT2 priors model tree params
+getFuncT3 priors mapping (0,_) model tree params = getFuncT2 priors model tree params
 getFuncT3 priors mapping numBSParam model tree params | trace ("getFuncT3 " ++ (show params)) True = (newtree,funcs) where
         (tree',remainder) = setBL' (map (:[]) params) tree
         remainder' = concat remainder

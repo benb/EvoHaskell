@@ -152,15 +152,15 @@ main = do args <- getArgs
                                                                                  OptNone                        -> do putStrLn "NOT PERFORMING OP"
                                                                                                                       return (t2',priorZero',alpha',sigma')
                                                                                  (OptMethod method)             -> do putStrLn "PERFORMING OPT"
-                                                                                                                      (treeans,[b',c',a']) <- optBSParamsBLIO method (1,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([sigma',priorZero',alpha'])
+                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([priorZero',alpha',sigma'])
                                                                                                                       print treeans
                                                                                                                       print (a',b',c')
                                                                                                                       print (logLikelihood treeans)
                                                                                                                       return (treeans,a',b',c') where
-                                                                                                                         lower = (replicate numModels $ Just 0.01) ++ [Just 0.01,Just 0.1]                                                                                                           
-                                                                                                                         upper = (replicate numModels $ Just 500.0) ++ [Just 0.99,Just 200.0]                                                                                                                  
+                                                                                                                         lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
+                                                                                                                         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
                                                                                                                          numModels = 1
-                                                                                                                         myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                                                                         myModel = thmmModel (cats+1) wagS piF
                                                putStrLn "START"
                                                print t2
                                                let a = map (fst . leftSplit) $ getAllF t2
@@ -206,17 +206,17 @@ main = do args <- getArgs
                                                                                                                    startTime <- getCurrentTime
                                                                                                                    putStrLn $ "Started " ++ (show id) ++ " " ++ (show startTime)
                                                                                                                    hFlush stdout
-                                                                                                                   ans <- optBSParamsBLIO slsqp (1,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([sigma,priorZero,alpha])
+                                                                                                                   ans <- optBSParamsBLIO var2 (0,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([priorZero,alpha,sigma])
                                                                                                                    putMVar hv ()
                                                                                                                    putMVar mv $ fst ans 
                                                                                                                    endTime <- getCurrentTime
                                                                                                                    let diffTime = endTime `diffUTCTime` startTime
                                                                                                                    putStrLn $ "Time taken " ++ (show (diffTime)) 
                                                                                                                    hFlush stdout where
-                                                                                                                     lower = (replicate numModels $ Just 0.0) ++ [Just 0.001,Just 0.001]                                                                                                           
-                                                                                                                     upper = (replicate numModels Nothing) ++ [Just 0.99,Just 200.0]                                                                                                                  
+                                                                                                                     lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
+                                                                                                                     upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
                                                                                                                      numModels = 1
-                                                                                                                     myModel = thmmPerBranchModel (cats+1) wagS piF
+                                                                                                                     myModel = thmmModel (cats+1) wagS piF
                                                                                     mapM_ (forkIO . opt mVar) $ zip3 simulations' staggerVars [0..]
                                                                                     replicateM (length simulations') $ takeMVar mVar 
                                                                       BranchOpt -> do putStrLn "BRANCH OPT"
