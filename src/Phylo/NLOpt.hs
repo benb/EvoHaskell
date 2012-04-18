@@ -10,6 +10,8 @@ import Control.Monad
 import Debug.Trace
 import Control.Applicative
 import Data.Maybe
+import Foreign.Marshal.Unsafe
+
 
 foreign import ccall safe "nlopt_c opt_bobyqa" 
         bobyqa_ :: CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt
@@ -39,28 +41,30 @@ foreign import ccall safe "nlopt_c opt_newuoa"
 foreign import ccall "wrapper"
         wrap :: (CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble) -> IO (FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)))
 
-nlopt :: (CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt) -> NLOptMethod -- [Double] -> Double ->  [Double] -> ([Double] -> (Double,Maybe [Double])) -> [Maybe Double] -> [Maybe Double] -> IO ([Double],Int)
+unsafeNlopt :: (CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt) -> NLOptMethod -- [Double] -> Double ->  [Double] -> ([Double] -> (Double,Maybe [Double])) -> [Maybe Double] -> [Maybe Double] -> IO ([Double],Int)
 
 
-type NLOptMethod = [Double] -> Double ->  [Double] -> ([Double] -> (Double,Maybe [Double])) -> [Maybe Double] -> [Maybe Double] -> IO ([Double],Int) 
+type NLOptMethod = [Double] -> Double ->  [Double] -> ([Double] -> (Double,Maybe [Double])) -> [Maybe Double] -> [Maybe Double] -> ([Double],Int) 
 instance Show NLOptMethod where
         show _ = "NLOpt"
 
-bobyqa = nlopt bobyqa_
-cobyla = nlopt cobyla_
-mma = nlopt mma_
-slsqp = nlopt slsqp_
-newton = nlopt newton_
-var1 = nlopt var1_
-var2 = nlopt var2_
-lbfgs = nlopt lbfgs_
-sbplx = nlopt sbplx_
-neldermead = nlopt neldermead_
-praxis = nlopt praxis_
-newuoa = nlopt newuoa_
+bobyqa = unsafeNlopt bobyqa_
+cobyla = unsafeNlopt cobyla_
+mma = unsafeNlopt mma_
+slsqp = unsafeNlopt slsqp_
+newton = unsafeNlopt newton_
+var1 = unsafeNlopt var1_
+var2 = unsafeNlopt var2_
+lbfgs = unsafeNlopt lbfgs_
+sbplx = unsafeNlopt sbplx_
+neldermead = unsafeNlopt neldermead_
+praxis = unsafeNlopt praxis_
+newuoa = unsafeNlopt newuoa_
 
 traceX a x = trace (show a ++ (show x)) x
 traceXm a = liftM (traceX a)
+unsafeNlopt met stepSize xtol params f lower upper = Foreign.Marshal.Unsafe.unsafeLocalState $ nlopt met stepSize xtol params f lower upper 
+
 nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 
                                                   stepSize' <- newArray $ map realToFrac stepSize
