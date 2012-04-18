@@ -148,20 +148,9 @@ main = do args <- getArgs
                                                let piF = fromList $ safeScaledAAFrequencies a
                                                let model = thmmModel (cats+1) wagS piF [priorZero',alpha',sigma']
                                                let t2' = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
-                                               (t2,priorZero,alpha,sigma) <- case optMethod of 
-                                                                                 OptNone                        -> do putStrLn "NOT PERFORMING OP"
-                                                                                                                      return (t2',priorZero',alpha',sigma')
-                                                                                 (OptMethod method)             -> do putStrLn "PERFORMING OPT"
-                                                                                                                      (treeans,[a',b',c']) <- optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2') (map (\x->0.01) lower) lower upper [1.0] myModel t2' ([priorZero',alpha',sigma'])
-                                                                                                                      print treeans
-                                                                                                                      print (a',b',c')
-                                                                                                                      print (logLikelihood treeans)
-                                                                                                                      return (treeans,a',b',c') where
-                                                                                                                         lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
-                                                                                                                         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
-                                                                                                                         numModels = 1
-                                                                                                                         myModel = thmmModel (cats+1) wagS piF
-                                               putStrLn "START"
+                                               let (t2,[priorZero,alpha,sigma]) = case optMethod of 
+                                                                                       OptNone                        -> (t2',[priorZero',alpha',sigma'])
+                                                                                       (OptMethod method)             -> optThmmModel 1 cats piF wagS t2' priorZero' alpha' sigma' method 
                                                print t2
                                                let a = map (fst . leftSplit) $ getAllF t2
                                                let b = getLeftSplit t2
@@ -180,7 +169,7 @@ main = do args <- getArgs
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let stochmapF a b c d e f g lM = calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites a b c d e f g Nothing
+                                               let stochmapF a b c d e f g lM = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites a b c d e f g 
                                                let stochmapT lM tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' lM where
                                                                     sitemap' = mapBack $ pAlignment pAln'
                                                                     pAln' = getAln tree
@@ -191,63 +180,38 @@ main = do args <- getArgs
                                                                     pi_i' = map toList $ getPi tree
                                                                     branchLengths' = toPBELengths pBEStr
                                                                     mixProbs' = getPriors tree
+                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
-                                               simulations :: [DNode] <- case optBoot of 
-                                                                      FullOpt -> do mVar <- newEmptyMVar
-                                                                                    putStrLn "FULL OPT"
-                                                                                    let threads = Sync.numCapabilities
-                                                                                    stagger <- replicateM threads newEmptyMVar
-                                                                                    mapM_ (\x->putMVar x ()) stagger
-                                                                                    let staggerVars = concat $ repeat stagger
-                                                                                    let opt mv (mytree,hv,id) = do gottheball<-takeMVar hv
-                                                                                                                   startTime <- getCurrentTime
-                                                                                                                   putStrLn $ "Started " ++ (show id) ++ " " ++ (show startTime)
-                                                                                                                   hFlush stdout
-                                                                                                                   ans <- optBSParamsBLIO var2 (0,numModels) (makeMapping (allIn []) mytree) (map (\x->0.01) lower) lower upper [1.0] myModel mytree ([priorZero,alpha,sigma])
-                                                                                                                   putMVar hv ()
-                                                                                                                   putMVar mv $ fst ans 
-                                                                                                                   endTime <- getCurrentTime
-                                                                                                                   let diffTime = endTime `diffUTCTime` startTime
-                                                                                                                   putStrLn $ "Time taken " ++ (show (diffTime)) 
-                                                                                                                   hFlush stdout where
-                                                                                                                     lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
-                                                                                                                     upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
-                                                                                                                     numModels = 1
-                                                                                                                     myModel = thmmModel (cats+1) wagS piF
-                                                                                    mapM_ (forkIO . opt mVar) $ zip3 simulations' staggerVars [0..]
-                                                                                    replicateM (length simulations') $ takeMVar mVar 
-                                                                      BranchOpt -> do putStrLn "BRANCH OPT"
-                                                                                      return $ parMap rseq optBLDFull0 simulations'
-                                                                      QuickBranchOpt -> do putStrLn "QUICK BRANCH OPT (todo)"
-                                                                                           return $ parMap rseq optBLDFull0 simulations'
-                                                                      NoOpt -> return $ simulations'
-                                               let outputMat (name,lM) = do ans' <- stochmapT lM t2 -- sitemap partials qset sitelikes pi_i branchLengths mixProbs Nothing
-                                                                            let ans = stochmapOrder ans' sitemap (getPriors t2) 
-                                                                            simStoch' <- mapM (stochmapT lM) simulations
-                                                                            let simStoch = map (\(x,y)->stochmapOrder x (treeToMap y) (getPriors y)) $ zip simStoch' simulations
-                                                                            --print $ map fst simStoch
-                                                                            let simStochDesc = map discrep simStoch
-                                                                            let ansDesc = discrep ans
-                                                                            let tot x = foldr (+) (0.0) x
-                                                                            let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
-                                                                            let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
-                                                                            let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
-                                                                            let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
-                                                                            --print edgeQuantileMap
-                                                                            let tempTree = annotateTreeWith edgeQuantileMap t2
-                                                                            writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
-                                                                            renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
-                                                                            renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-branch.pdf"
-                                                                            renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
-                                               outputMat ("inter",interLMat (cats+1) 20)
-                                               outputMat ("intra",intraLMat (cats+1) 20)
+                                               let simulations :: [DNode] = case (optBoot,optMethod) of 
+                                                                      (FullOpt,OptMethod method) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma method) simulations'
+                                                                      (FullOpt,OptNone) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma bobyqa) simulations'
+                                                                      (BranchOpt,_) -> map optBLDFull0 simulations'
+                                                                      (QuickBranchOpt,_) -> map optBLDFull0 simulations'
+                                                                      (NoOpt,_) -> simulations'
+                                               let (simStochInter,simStochIntra) = unzip $ parMap rdeepseq (\x-> (stochmapTT (interLMat (cats+1) 20) x, stochmapTT (intraLMat (cats+1) 20) x)) simulations
+                                               let ansInter = stochmapTT (interLMat (cats+1) 20) t2
+                                               let ansIntra = stochmapTT (intraLMat (cats+1) 20) t2
+                                               let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
+                                                                                              let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
+                                                                                              let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
+                                                                                              let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
+                                                                                              let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
+                                                                                              let tempTree = annotateTreeWith edgeQuantileMap t2
+                                                                                              writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
+                                                                                              renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
+                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-branch.pdf"
+                                                                                              renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                               outputMat ("inter",simStochInter,ansInter)
+                                               outputMat ("intra",simStochIntra,ansIntra)
                                                return Nothing
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
+
+
 
 length2 = map length
 length3 = map length2
@@ -399,3 +363,7 @@ allInDynamic' l r ("@":set) = allInNoRoot' l r set
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
                                                              
+optThmmModel numModels cats pi s t2 priorZero alpha sigma method = optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 ([priorZero,alpha,sigma]) where
+        lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
+        upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
+        myModel = thmmModel (cats+1) s pi
