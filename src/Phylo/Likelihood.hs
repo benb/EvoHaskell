@@ -924,35 +924,36 @@ genList stdGen = first:remainder where
 
 makeSimulatedTree = makeSimulatedTreeX True
 
-makeSimulatedTreeX withGaps seqDataType hiddenClasses stdGen length (DTree l m r _ _ priors pis) = DTree left middle right pLs (replicate length 1) priors pis where
-        left = makeSimulatedTree' withGaps seqDataType hiddenClasses leftR topSeq models l
-        middle = makeSimulatedTree' withGaps seqDataType hiddenClasses middleR topSeq models m
-        right = makeSimulatedTree' withGaps seqDataType hiddenClasses rightR topSeq models r
+makeSimulatedTreeX withGaps seqDataType hiddenClasses stdGen len (DTree l m r _ pC priors pis) = DTree left middle right pLs (replicate len 1) priors pis where
+        left = makeSimulatedTree' pC withGaps seqDataType hiddenClasses leftR topSeq models l
+        middle = makeSimulatedTree' pC withGaps seqDataType hiddenClasses middleR topSeq models m
+        right  = makeSimulatedTree' pC withGaps seqDataType hiddenClasses rightR topSeq models r
         pLs = calcRootPL l m r
         (r0:r1:leftR:middleR:rightR:remainder) = genList stdGen
-        models = take length $ map (drawFromDist priors) $ randomRs (0.0,1.0) r0
+        models = take len $ map (drawFromDist priors) $ randomRs (0.0,1.0) r0
         drawLetters :: [Int]
-        drawLetters = map (\(p,pri) -> drawFromDist pri p) $ zip (randomRs (0.0,1.0) r1) $ map toList $ map (pis!!) models
+        drawLetters  = map (\(p,pri) -> drawFromDist pri p) $ zip (randomRs (0.0,1.0) r1) $ map toList $ map (pis!!) models
         topSeq :: [Int]
-        topSeq = take length drawLetters 
+        topSeq = take len drawLetters 
 
-makeSimulatedTree' :: Bool -> SeqDataType -> Int -> StdGen -> [Int] -> [Int] -> DNode -> DNode
-makeSimulatedTree' withGaps Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimplemented"
+--makeSimulatedTree' :: Bool -> SeqDataType -> Int -> StdGen -> [Int] -> [Int] -> DNode -> DNode
+makeSimulatedTree' pC withGaps Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimplemented"
 
-makeSimulatedTree' withGaps AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist oldSeq _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
+makeSimulatedTree' pC withGaps AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist oldSeq _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
         myMats = DVec.fromList $ map DVec.fromList $ map toLists $ map (\x -> fst $x dist) modelList
         myVectors :: [DVec.Vector [Double]]
         myVectors = map (myMats!) models
         myVectors' = (map (\(vec,base) -> vec!base) $ zip myVectors topSeq)
         bottomSeq'= map (aaOrderVec!) $ map (`mod` 20 ) $ map (\(p,pris) -> drawFromDist pris p) $ zip (randomRs (0.0,1.0) stdGen) myVectors'
-        bottomSeq = map overlay $ zip bottomSeq' oldSeq
+        bottomSeq = map overlay $ zip bottomSeq' oldSeq'
+        oldSeq' = concatMap (\(c,p) -> replicate c p) $ zip pC oldSeq
         overlay (x,y) = case (withGaps,x,y) of 
                           (True,_,'-') -> '-'
                           (_,a,_)      -> a
         pLs = calcLeafPL tipLkl dist modelList
-        tipLkl | trace bottomSeq True = getPartial hiddenClasses AminoAcid bottomSeq
+        tipLkl = getPartial hiddenClasses AminoAcid bottomSeq
 
-makeSimulatedTree' withGaps seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
+makeSimulatedTree' pC withGaps seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
         myMats = DVec.fromList $ map (DVec.fromList . toLists) $ map (\x -> fst$ x dist) modelList
         myVectors :: [DVec.Vector [Double]]
         myVectors = map (myMats!) models
@@ -960,8 +961,8 @@ makeSimulatedTree' withGaps seqDataType hiddenClasses stdGen topSeq models (DINo
         bottomSeqPartial :: [(Double,[Double])]
         bottomSeqPartial = zip (randomRs (0.0,1.0) r0) (map (\(vec,base) -> vec!base) $ zip myVectors topSeq) 
         bottomSeq = map (\(p,pris) -> drawFromDist pris p) bottomSeqPartial
-        left = makeSimulatedTree' withGaps seqDataType hiddenClasses leftR bottomSeq models l
-        right = makeSimulatedTree' withGaps seqDataType hiddenClasses rightR bottomSeq models r
+        left = makeSimulatedTree' pC withGaps seqDataType hiddenClasses leftR bottomSeq models l
+        right = makeSimulatedTree' pC withGaps seqDataType hiddenClasses rightR bottomSeq models r
         pLs = calcPL left right dist modelList
 
 drawFromDist pris = drawFromDist' $ map nonNeg pris where
@@ -978,8 +979,8 @@ drawFromDist'' :: Int -> [Double] -> Double -> Int
 --drawFromDist' c pris p | trace ((show c) ++ " " ++ (show pris) ++ " " ++ (show p)) False = undefined
 drawFromDist'' c (pri:pris) p = if (p <= pri) then c else (drawFromDist'' (c+1) pris (p-pri))
 
-simulateSequences seqDataType hiddenClasses stdGen length root = getAln simTree where 
-        simTree  = makeSimulatedTree seqDataType hiddenClasses stdGen length root
+simulateSequences seqDataType hiddenClasses stdGen len root = getAln simTree where 
+        simTree  = makeSimulatedTree seqDataType hiddenClasses stdGen len root
 
 getAln tree = quickListAlignment names seqs where
         leaves = getLeaves tree

@@ -163,7 +163,7 @@ main = do args <- getArgs
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let stochmapF tree a b c d e f g lM = calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites a b c d e f g Nothing where
+                                               let stochmapF tree a b c d e f g lM = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites a b c d e f g where
                                                                                 (nSite,nCols,multiplicites) = getAlnData pAln
                                                                                 pAln = pAlignment $ getAln tree
                                                                                 pBEStr = getPartialBranchEnds tree
@@ -178,7 +178,7 @@ main = do args <- getArgs
                                                                     pi_i' = map toList $ getPi tree
                                                                     branchLengths' = toPBELengths pBEStr'
                                                                     mixProbs' = getPriors tree
-                                               let stochmapTT lM tree = (liftM discrep) $ (liftM (\x-> stochmapOrder x (treeToMap tree) (getPriors tree))) (stochmapT lM tree) --stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
+                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
@@ -189,12 +189,11 @@ main = do args <- getArgs
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
-                                               simS <- mapM (dualStochMap stochmapTT (interLMat (cats+1) 20) (intraLMat (cats+1) 20))  simulations
-                                               print simS
---                                               let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
-                                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
-                                               ansInter <- stochmapTT (interLMat (cats+1) 20) t2
-                                               ansIntra <- stochmapTT (intraLMat (cats+1) 20) t2
+                                               let simS = map (dualStochMap stochmapTT (interLMat (cats+1) 20) (intraLMat (cats+1) 20))  simulations
+                                               let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                --                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                                               let ansInter = stochmapTT (interLMat (cats+1) 20) t2
+                                               let ansIntra = stochmapTT (intraLMat (cats+1) 20) t2
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
@@ -214,9 +213,7 @@ main = do args <- getArgs
 
 
 
-dualStochMap stochmapTT a b x = do a'<-stochmapTT a x
-                                   b'<-stochmapTT b x
-                                   return (a',b')
+dualStochMap stochmapTT a b x = (stochmapTT a x, stochmapTT b x)
 length2 = map length
 length3 = map length2
 
@@ -376,6 +373,8 @@ optThmmModel numModels cats pi s t2 priorZero alpha sigma method = optBSParamsBL
 --all the data needed is in modelTree
 --but this hack will 'recompress' the data
 --to site patterns
-patternSimulation origTree modelTree model priors stdGen dataType cats length = addModelFx (structDataN (cats+1) AminoAcid (pAln) origTree) model priors where
-                                                                         pAln = pAlignment $ getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen length modelTree 
+patternSimulation origTree modelTree model priors stdGen dataType cats len = trace ("cols " ++ (show len) ++ " " ++ (show $ length (Phylo.Alignment.columns lAln))) ans where
+                             ans = addModelFx (structDataN (cats+1) AminoAcid (pAln) origTree) model priors 
+                             pAln = pAlignment $ lAln
+                             lAln = getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen len modelTree 
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
