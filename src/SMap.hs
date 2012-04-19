@@ -143,8 +143,6 @@ main = do args <- getArgs
                 (Just a,Right t,params)->   do let (sigma',priorZero',alpha') = case modelParams of 
                                                                                  Thmm a b c -> (a,b,c)
                                                let pAln = pAlignment a
-                                               let (nSite,nCols,multiplicites) = getAlnData pAln where
-                                                   getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
                                                let piF = fromList $ safeScaledAAFrequencies a
                                                let model = thmmModel (cats+1) wagS piF [priorZero',alpha',sigma']
                                                let t2' = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
@@ -162,15 +160,15 @@ main = do args <- getArgs
                                                let mixProbs = getPriors t2
                                                let qMat = thmmModelQ (cats+1) wagS piF [priorZero,alpha,sigma]
                                                let qset = [toLists qMat]
-                                               let pBEStr = getPartialBranchEnds t2
-                                               let partials = map (map (map (toLists . trans))) $ toPBEList pBEStr
-                                               let branchLengths = toPBELengths pBEStr
-                                               let nBranch =  length $ toPBELengths pBEStr
                                                let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
                                                let sitemap = mapBack pAln
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let stochmapF a b c d e f g lM = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites a b c d e f g 
-                                               let stochmapT lM tree = stochmapF sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' lM where
+                                               let stochmapF tree a b c d e f g lM = calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites a b c d e f g Nothing where
+                                                                                (nSite,nCols,multiplicites) = getAlnData pAln
+                                                                                pAln = pAlignment $ getAln tree
+                                                                                pBEStr = getPartialBranchEnds tree
+                                                                                nBranch =  length $ toPBELengths pBEStr
+                                               let stochmapT lM tree = stochmapF tree sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' lM where
                                                                     sitemap' = mapBack $ pAlignment pAln'
                                                                     pAln' = getAln tree
                                                                     pBEStr' = getPartialBranchEnds tree
@@ -178,22 +176,25 @@ main = do args <- getArgs
                                                                     qset' = map toLists $ getQMat tree
                                                                     sitelikes' = [likelihoods tree] --FIXME
                                                                     pi_i' = map toList $ getPi tree
-                                                                    branchLengths' = toPBELengths pBEStr
+                                                                    branchLengths' = toPBELengths pBEStr'
                                                                     mixProbs' = getPriors tree
-                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
+                                               let stochmapTT lM tree = (liftM discrep) $ (liftM (\x-> stochmapOrder x (treeToMap tree) (getPriors tree))) (stochmapT lM tree) --stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               let simulations' = map (\x->makeSimulatedTree AminoAcid (cats+1) x alnLength t2) stdGens
+                                               let simulations' = map (\x-> patternSimulation t t2 model [1.0] x AminoAcid cats alnLength) stdGens
                                                let simulations :: [DNode] = case (optBoot,optMethod) of 
                                                                       (FullOpt,OptMethod method) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma method) simulations'
                                                                       (FullOpt,OptNone) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma bobyqa) simulations'
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
-                                               let (simStochInter,simStochIntra) = unzip $ parMap rdeepseq (\x-> (stochmapTT (interLMat (cats+1) 20) x, stochmapTT (intraLMat (cats+1) 20) x)) simulations
-                                               let ansInter = stochmapTT (interLMat (cats+1) 20) t2
-                                               let ansIntra = stochmapTT (intraLMat (cats+1) 20) t2
+                                               simS <- mapM (dualStochMap stochmapTT (interLMat (cats+1) 20) (intraLMat (cats+1) 20))  simulations
+                                               print simS
+--                                               let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                                               ansInter <- stochmapTT (interLMat (cats+1) 20) t2
+                                               ansIntra <- stochmapTT (intraLMat (cats+1) 20) t2
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
@@ -213,6 +214,9 @@ main = do args <- getArgs
 
 
 
+dualStochMap stochmapTT a b x = do a'<-stochmapTT a x
+                                   b'<-stochmapTT b x
+                                   return (a',b')
 length2 = map length
 length3 = map length2
 
@@ -367,3 +371,11 @@ optThmmModel numModels cats pi s t2 priorZero alpha sigma method = optBSParamsBL
         lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
         myModel = thmmModel (cats+1) s pi
+
+--this is a bit of a hack really
+--all the data needed is in modelTree
+--but this hack will 'recompress' the data
+--to site patterns
+patternSimulation origTree modelTree model priors stdGen dataType cats length = addModelFx (structDataN (cats+1) AminoAcid (pAln) origTree) model priors where
+                                                                         pAln = pAlignment $ getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen length modelTree 
+getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
