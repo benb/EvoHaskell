@@ -982,10 +982,12 @@ drawFromDist'' c (pri:pris) p = if (p <= pri) then c else (drawFromDist'' (c+1) 
 simulateSequences seqDataType hiddenClasses stdGen len root = getAln simTree where 
         simTree  = makeSimulatedTree seqDataType hiddenClasses stdGen len root
 
-getAln tree = quickListAlignment names seqs where
+getAln tree@(DTree _ _ _ _ pC _ _) = quickListAlignment names seqs where
         leaves = getLeaves tree
         names = map dName leaves
-        seqs = map Phylo.Likelihood.sequence leaves
+        seqs' = map Phylo.Likelihood.sequence leaves
+        seqs = map (concatMap (\(c,p) -> replicate c p)) $ map (zip pC) seqs'
+        
 
 
 annotateTreeWith :: [(([String],[String]),Double)] -> DNode -> DNode 

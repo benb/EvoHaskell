@@ -33,7 +33,7 @@ Executable smap
         Main-Is: SMap.hs
         HS-Source-Dirs: src
         ghc-options:        -O2 -rtsopts -threaded
-        extra-libraries: nlopt 
+        --extra-libraries: nlopt 
         if os(OSX)
                 frameworks: Accelerate
                 ghc-options: -fllvm
