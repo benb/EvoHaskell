@@ -378,3 +378,10 @@ patternSimulation origTree modelTree model priors stdGen dataType cats len = tra
                              pAln = pAlignment $ lAln
                              lAln = getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen len modelTree 
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
+
+cramerVonMises empQ theQs = pvalue where
+        v = fromIntegral $ length empQ 
+        cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (fromIntegral ((2*i)-1)/(2*v)) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
+        wv2_emp = cram empQ
+        wv2_thes = map cram theQs
+        pvalue = (fromIntegral $ length (filter (<=wv2_emp) wv2_thes)) / (fromIntegral $ length theQs)
