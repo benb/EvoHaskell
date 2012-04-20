@@ -202,9 +202,13 @@ main = do args <- getArgs
                                                                                               let tempTree = annotateTreeWith edgeQuantileMap t2
                                                                                               writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
                                                                                               writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
-                                                                                              renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
-                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
-                                                                                              renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                                                                              m1 <- newEmptyMVar
+                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
+                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
+                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                                                                              takeMVar m1 
+                                                                                              takeMVar m1 
+                                                                                              takeMVar m1 
                                                outputMat ("switch",simStochInter,ansInter)
                                                outputMat ("subs",simStochIntra,ansIntra)
                                                return Nothing
@@ -213,6 +217,8 @@ main = do args <- getArgs
                Nothing -> return ()
 
 
+renderableToPDFFileM mvar a b c d = do renderableToPDFFile a b c d
+                                       putMVar mvar ()
 
 dualStochMap stochmapTT a b x = (stochmapTT a x, stochmapTT b x)
 length2 = map length
