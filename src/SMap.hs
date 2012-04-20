@@ -195,17 +195,18 @@ main = do args <- getArgs
                                                let ansInter = stochmapTT (interLMat (cats+1) 20) t2
                                                let ansIntra = stochmapTT (intraLMat (cats+1) 20) t2
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
-                                                                                              let (line,lower,upper) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
-                                                                                              let (line1,lower1,upper1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
-                                                                                              let (line2,lower2,upper2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
+                                                                                              let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
+                                                                                              let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
+                                                                                              let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
                                                                                               let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
                                                                                               let tempTree = annotateTreeWith edgeQuantileMap t2
                                                                                               writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
+                                                                                              writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
                                                                                               renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
-                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-branch.pdf"
+                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
                                                                                               renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
-                                               outputMat ("inter",simStochInter,ansInter)
-                                               outputMat ("intra",simStochIntra,ansIntra)
+                                               outputMat ("switch",simStochInter,ansInter)
+                                               outputMat ("subs",simStochIntra,ansIntra)
                                                return Nothing
           case output of
                Just str -> putStrLn str
@@ -234,8 +235,8 @@ perLocationQuantile numQuantile simulated locdist = map ((/ (fromIntegral numQua
 
 
                   
-makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double])
-makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper) where
+makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double)
+makeQQLine numQuantile simulated empirical = (empQuantile,lower,upper,pvalue) where
                                         revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
                                         revQuantileRawF x = UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
 
@@ -244,7 +245,11 @@ makeQQLine numQuantile simulated empirical = (revQuantile empirical,lower,upper)
                                         simQuantiles = map (quantileF simVec) [0..numQuantile]
 
                                         numSim = length simulated
-                                        revQuantileSimS = map sort $ transpose $ map revQuantile simulated
+                                        revQuantileSimS = map sort $ transpose revQuantileSimS'
+                                        revQuantileSimS' = map revQuantile simulated
+                                        empQuantile = revQuantile empirical
+                                        pvalue = cramerVonMises empQuantile revQuantileSimS'
+
                                         lowerI = floor $ (fromIntegral numSim) * 0.025
                                         upperI = (ceiling ((fromIntegral numSim) * 0.975)) - 1 
                                         lower = map (!!lowerI) revQuantileSimS
@@ -378,9 +383,8 @@ patternSimulation origTree modelTree model priors stdGen dataType cats len = tra
                              pAln = pAlignment $ lAln
                              lAln = getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen len modelTree 
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
-
 cramerVonMises empQ theQs = pvalue where
-        v = fromIntegral $ length empQ 
+        v = fromIntegral $ length empQ
         cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (fromIntegral ((2*i)-1)/(2*v)) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
         wv2_emp = cram empQ
         wv2_thes = map cram theQs
