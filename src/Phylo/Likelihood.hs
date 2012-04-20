@@ -126,9 +126,15 @@ blankMat matrix numClass except = fromRows filtRows where
                                         
 
 likelihoods :: DNode -> [Double]
-likelihoods (DTree _ _ _ pLs _ priors pis) = map summarise (transpose likelihoodss) where
+likelihoods t@(DTree _ _ _ pLs _ priors pis) = map summarise likelihoodss where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
+                                                likelihoodss = rawlikelihoods t
+
+-- likelihoods per pattern, indexed by model then site
+rawlikelihoods :: DNode -> [[Double]] 
+rawlikelihoods (DTree _ _ _ pLs _ priors pis) = transpose likelihoodss where
                                                 likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
+                                        
 
 likelihoodsPerSite aln tree = likelihoodss' where
                                 likelihoodss = likelihoods tree
@@ -509,26 +515,33 @@ setLeftBL (DTree (DINode l1 r1 dist model _) m r _ pC priors pi) x = (DTree newl
 optLeftBL tree  = setLeftBL tree best where
                         (DTree l _ _ _ _ _ _ ) = tree
                         best = case l of 
-                                (DINode _ _ [param] _ _) -> (safeGoldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
-                                (DLeaf _ [param] _ _ _ _) -> (safeGoldenSection 0.01 1E-6 10.0 (invert $ (\x -> logLikelihood $ setLeftBL tree [x]))) : []
+                                (DINode _ _ [param] _ _) -> getLeftBL $ optLeftBLx 0 tree
+                                (DLeaf _ [param] _ _ _ _) -> getLeftBL $ optLeftBLx 0 tree
                                 (DLeaf _ params _ _ _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
                                 (DINode _ _ params _ _) -> fst $ maximize NMSimplex2 1E-4 1000 (map (\i->0.05) params) (boundedBLfunc (\x -> logLikelihood $ setLeftBL tree x)) params    
 
 getLeftBL (DTree (DINode _ _ x _ _) _ _ _ _ _ _) = x
 getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 
+sensibleBrent tol ftol f hardL hardU startB startF = brent tol ftol f boundL boundU startB fBoundL fBoundU startF where
+        boundL' = max hardL (startB/2)
+        boundU' = min hardU (startB*2)
+        fBoundU' = f boundU'
+        fBoundL' = f boundL'
+        (boundL,fBoundL) = case (boundL',fBoundL') of 
+                                (a,b) | b > startF -> (boundL',fBoundL')
+                                      | otherwise  -> (hardL, f hardL)
+        (boundU,fBoundU) = case (boundU',fBoundU') of 
+                                (a,b) | b > startF -> (boundU',fBoundU')
+                                      | otherwise  -> (hardU, f hardU)
+
+
 optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ bestTree where
                                 startBL = getLeftBL tree
                                 startB = head $ drop val startBL
                                 startLL = logLikelihood tree
                                 f = (invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
-                                boundL = max 1E-4 (startB/2)
-                                boundU = min 50.0 (startB*2)
-                                fBoundU = f boundU
-                                fBoundL = f boundL
-                                b = case (fBoundL,fBoundU) of 
-                                        (a,b) | a > (-startLL) && b > (-startLL) -> brent 1E-3 1E-3 f boundL boundU startB fBoundL fBoundU (-startLL)
-                                              | otherwise -> brent 1E-3 1E-3 f 1E-4 50.0 (min (max 1E-4 startB) 50.0) (f 1E-4) (f 50.0) (f (min (max 1E-4 startB) 50.0))
+                                b= sensibleBrent 1E-3 1E-3 f 1E-4 50.0 startB (f startB)
                                 best = replace val [b] startBL
                                 bestTree' = setLeftBL tree best 
                                 --protect from golden section screw-ups
@@ -645,6 +658,10 @@ quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid al
 gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
                                 models = map (\r -> (\x ->(scaledpT r eigenS x,mat))) $ gamma numCat alpha
                                 (eigenS,mat) = quickEigen' pi s
+gammaModelQ numCat s pi (alpha:xs) = map (\r -> setRate r initMat pi) $ gamma numCat alpha where
+                                initMat = makeQ s pi
+                                
+
 
 thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
                         priors =  (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
@@ -845,7 +862,12 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
                 list@((x,BL):xs) -> optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where -- Opt Params
-                                (bestParams',err) = bobyqa stepSize 1E-3 (enforceBounds lower upper startParams) f lower upper 
+                                bestParams' = case (tail startParams) of 
+                                                        [] -> [sensibleBrent 1E-3 1E-3 f2 upper' lower' (head startParams) (f2 $ head startParams)] where
+                                                                        upper' = fromMaybe (-(1E10)) (head lower)
+                                                                        lower' = fromMaybe 1E10 (head upper)
+                                                                        f2 x = -(fst $ f [x])
+                                                        _  -> fst $ bobyqa stepSize 1E-3 (enforceBounds lower upper startParams) f lower upper 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree

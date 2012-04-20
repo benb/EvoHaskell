@@ -45,14 +45,21 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
           , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
           , Option [] ["thmm"] (OptArg thmmModelR "init params") "Use THMM model"
+          , Option [] ["gamma"] (OptArg gammaModelR "init params") "Use Gamma model"
           , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data"
             ]
 
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
-                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 1.0 0.1 1.0 }
+                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
                                         [a,b,c] -> return opt { optModel = Thmm a b c }
                                         _       -> error $ "Can't parse three doubles from " ++ args
+
+gammaModelR arg opt | trace "THMM found" True  = case arg of 
+                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Ras 1.0 }
+                      Just args | trace ("THMM " ++ args) True -> case (read args) of 
+                                        a -> return opt { optModel = Ras a }
+
 
 optAlgR arg opt = case arg of 
                         Nothing -> return opt {optAlg = OptMethod var2}
@@ -140,28 +147,24 @@ main = do args <- getArgs
                                     return Nothing
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
-                (Just a,Right t,params)->   do let (sigma',priorZero',alpha') = case modelParams of 
-                                                                                 Thmm a b c -> (a,b,c)
+                (Just a,Right t,paramT)->   do let method = bobyqa
                                                let pAln = pAlignment a
                                                let piF = fromList $ safeScaledAAFrequencies a
-                                               let model = thmmModel (cats+1) wagS piF [priorZero',alpha',sigma']
-                                               let t2' = addModelFx (structDataN (cats+1) AminoAcid (pAln) t) model [1.0]
-                                               let (t2,[priorZero,alpha,sigma]) = case optMethod of 
-                                                                                       OptNone                        -> (t2',[priorZero',alpha',sigma'])
-                                                                                       (OptMethod method)             -> optThmmModel 1 cats piF wagS t2' priorZero' alpha' sigma' method 
-                                               print t2
+                                               let (modelF,initparams,qsetF,optF) = case modelParams of 
+                                                                                Thmm a b c -> (thmmModel (cats+1) wagS piF,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) wagS piF x]), optThmmModel method 1 cats piF wagS)
+                                                                                Ras a -> (gammaModel cats wagS piF,[a],(\x -> map toLists (gammaModelQ cats wagS piF x)), optGammaModel method cats piF wagS )
+                                               let (t2',priors,nClasses) = case modelParams of 
+                                                                                Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
+                                                                                Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
+                                               let nState = nClasses * 20
+                                               let (t2,params) = case optMethod of 
+                                                                                       OptNone                        -> (t2',initparams)
+                                                                                       (OptMethod _)                  -> optF t2' initparams
                                                let a = map (fst . leftSplit) $ getAllF t2
                                                let b = getLeftSplit t2
                                                print $ "OK? " ++ (show (a==b))
                                                putStrLn "END"
-                                               let nState = (cats+1)*20
-                                               let nProc = 1 {-- fixme --}
-                                               let pi_i = map toList (snd model) 
-                                               let mixProbs = getPriors t2
-                                               let qMat = thmmModelQ (cats+1) wagS piF [priorZero,alpha,sigma]
-                                               let qset = [toLists qMat]
-                                               let sitelikes = [likelihoods t2] {-- FIXME, outer dimension is nProc, assume 1 --}
-                                               let sitemap = mapBack pAln
+                                               let nProc = length priors
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
                                                let stochmapF tree a b c d e f g lM = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites a b c d e f g where
                                                                                 (nSite,nCols,multiplicites) = getAlnData pAln
@@ -174,7 +177,7 @@ main = do args <- getArgs
                                                                     pBEStr' = getPartialBranchEnds tree
                                                                     partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr'
                                                                     qset' = map toLists $ getQMat tree
-                                                                    sitelikes' = [likelihoods tree] --FIXME
+                                                                    sitelikes' = rawlikelihoods tree
                                                                     pi_i' = map toList $ getPi tree
                                                                     branchLengths' = toPBELengths pBEStr'
                                                                     mixProbs' = getPriors tree
@@ -182,18 +185,17 @@ main = do args <- getArgs
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               let simulations' = map (\x-> patternSimulation t t2 model [1.0] x AminoAcid cats alnLength) stdGens
+                                               let simulations' = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens
                                                let simulations :: [DNode] = case (optBoot,optMethod) of 
-                                                                      (FullOpt,OptMethod method) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma method) simulations'
-                                                                      (FullOpt,OptNone) -> map (\x->fst $ optThmmModel 1 cats piF wagS x priorZero alpha sigma bobyqa) simulations'
+                                                                      (FullOpt,_) -> map (\x->fst $ optF x params) simulations'
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
-                                               let simS = map (dualStochMap stochmapTT (interLMat (cats+1) 20) (intraLMat (cats+1) 20))  simulations
+                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20))  simulations
                                                let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
                 --                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
-                                               let ansInter = stochmapTT (interLMat (cats+1) 20) t2
-                                               let ansIntra = stochmapTT (intraLMat (cats+1) 20) t2
+                                               let ansInter = stochmapTT (interLMat nClasses 20) t2
+                                               let ansIntra = stochmapTT (intraLMat nClasses 20) t2
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
@@ -374,8 +376,10 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
-                                                             
-optThmmModel numModels cats pi s t2 priorZero alpha sigma method = optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 ([priorZero,alpha,sigma]) where
+optGammaModel method cats pi s = optBSParamsBLIO method (0,0) (\x->0) [0.1] [Just 0.01] [Just 100.0] (flatPriors cats) model where                                                           
+        model = gammaModel cats s pi
+                                
+optThmmModel method numModels cats pi s t2 params = traceShow params $ optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
         lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
         myModel = thmmModel (cats+1) s pi
@@ -384,14 +388,17 @@ optThmmModel numModels cats pi s t2 priorZero alpha sigma method = optBSParamsBL
 --all the data needed is in modelTree
 --but this hack will 'recompress' the data
 --to site patterns
-patternSimulation origTree modelTree model priors stdGen dataType cats len = trace ("cols " ++ (show len) ++ " " ++ (show $ length (Phylo.Alignment.columns lAln))) ans where
-                             ans = addModelFx (structDataN (cats+1) AminoAcid (pAln) origTree) model priors 
-                             pAln = pAlignment $ lAln
-                             lAln = getAln $ makeSimulatedTree AminoAcid (cats+1) stdGen len modelTree 
+patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
+                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
+                             pAln = traceShow lAln $ pAlignment $ lAln
+                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
+
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
 cramerVonMises empQ theQs = pvalue where
         v = fromIntegral $ length empQ
-        cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (fromIntegral ((2*i)-1)/(2*v)) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
+        cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (square (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
         wv2_emp = cram empQ
         wv2_thes = map cram theQs
+        square x = x*x
         pvalue = (fromIntegral $ length (filter (<=wv2_emp) wv2_thes)) / (fromIntegral $ length theQs)
+
