@@ -128,11 +128,11 @@ blankMat matrix numClass except = fromRows filtRows where
 likelihoods :: DNode -> [Double]
 likelihoods t@(DTree _ _ _ pLs _ priors pis) = map summarise likelihoodss where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
-                                                likelihoodss = rawlikelihoods t
+                                                likelihoodss = transpose $ rawlikelihoods t
 
 -- likelihoods per pattern, indexed by model then site
 rawlikelihoods :: DNode -> [[Double]] 
-rawlikelihoods (DTree _ _ _ pLs _ priors pis) = transpose likelihoodss where
+rawlikelihoods (DTree _ _ _ pLs _ priors pis) = likelihoodss where
                                                 likelihoodss = map toList $ map (\(pi,pL) -> pi <> pL) $ zip pis pLs
                                         
 
