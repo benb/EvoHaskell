@@ -536,7 +536,8 @@ sensibleBrent tol ftol f hardL hardU startB startF = brent tol ftol f boundL bou
                                       | otherwise  -> (hardU, f hardU)
 
 
-optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ bestTree where
+--optLeftBLx val tree  = traceShow ("OptBL " ++ (show startBL) ++ " -> " ++ (show best) ++ " -> " ++ (show $ logLikelihood $ setLeftBL tree best)) $ bestTree where
+optLeftBLx val tree  =  bestTree where
                                 startBL = getLeftBL tree
                                 startB = head $ drop val startBL
                                 startLL = logLikelihood tree
