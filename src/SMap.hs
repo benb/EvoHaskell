@@ -165,28 +165,14 @@ main = do args <- getArgs
                                                let (t2,params) = case optMethod of 
                                                                                        OptNone                        -> (t2',initparams)
                                                                                        (OptMethod _)                  -> optF t2' initparams
-                                               let a = map (fst . leftSplit) $ getAllF t2
-                                               let b = getLeftSplit t2
-                                               print $ "OK? " ++ (show (a==b))
+                                               let aX = map (fst . leftSplit) $ getAllF t2
+                                               let bX = getLeftSplit t2
+                                               print $ "OK? " ++ (show (aX==bX))
                                                putStrLn "END"
                                                let nProc = length priors
                                                putStrLn $ show $ zip [0..] $ getCols pAln 
-                                               let stochmapF tree a b c d e f g lM = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites a b c d e f g where
-                                                                                (nSite,nCols,multiplicites) = getAlnData pAln
-                                                                                pAln = pAlignment $ getAln tree
-                                                                                pBEStr = getPartialBranchEnds tree
-                                                                                nBranch =  length $ toPBELengths pBEStr
-                                               let stochmapT lM tree = stochmapF tree sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' lM where
-                                                                    sitemap' = mapBack $ pAlignment pAln'
-                                                                    pAln' = getAln tree
-                                                                    pBEStr' = getPartialBranchEnds tree
-                                                                    partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr'
-                                                                    qset' = map toLists $ getQMat tree
-                                                                    sitelikes' = rawlikelihoods tree
-                                                                    pi_i' = map toList $ getPi tree
-                                                                    branchLengths' = toPBELengths pBEStr'
-                                                                    mixProbs' = getPriors tree
-                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT lM tree) (treeToMap tree) (getPriors tree)
+                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT nProc nState (getAln tree) lM tree) (treeToMap tree) (getPriors tree)
+                                               let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT nProc nState a lM tree) (treeToMap tree) (getPriors tree)
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
@@ -220,7 +206,10 @@ main = do args <- getArgs
                                                                                               takeMVar m1 
                                                                                               takeMVar m1 
                                                                                               takeMVar m1 
-                                               let ansIntra = stochmapTT (intraLMat nClasses 20) t2
+                                               let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
+                                               putStrLn "ansIntra"
+                                               print ansIntra
+                                               putStrLn "END ansIntra"
                                                outputMat ("subs",simStochIntra,ansIntra)
                                                if (nClasses==1) 
                                                  then return ()
@@ -307,12 +296,13 @@ joinWith i [x] = (show x)
 joinWith i [] = []
 
 stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[Double])
-stochmapOrder (condE,priorE) mapping priors = order where
+stochmapOrder (condE,priorE) mapping priors = traceShow (condE,priorE) order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
-                                                fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
+                                                fixProc pr x = foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x)
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
+                                                traceX y x = trace (show y ++ ":   " ++ (show x)) x 
 
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
 stochmapOut (condE',priorE') mapping priors f = do 
@@ -415,3 +405,15 @@ cramerVonMises empQ theQs = pvalue where
         square x = x*x
         pvalue = (fromIntegral $ length (filter (<=wv2_emp) wv2_thes)) / (fromIntegral $ length theQs)
 
+stochmapT nProc nState aln' lM tree = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
+        sitemap' = mapBack pAln'
+        pAln' = pAlignment aln'
+        (nSite,nCols,multiplicites) = getAlnData pAln'
+        nBranch =  length $ toPBELengths pBEStr
+        pBEStr = getPartialBranchEnds tree
+        partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr
+        qset' = map toLists $ getQMat tree
+        sitelikes' = rawlikelihoods tree
+        pi_i' = map toList $ getPi tree
+        branchLengths' = toPBELengths pBEStr
+        mixProbs' = getPriors tree
