@@ -201,9 +201,9 @@ main = do args <- getArgs
                 --                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               if raw
-                                                                                                      then do writeRaw2 (name ++"-all-raw-null.txt") simStochDesc
-                                                                                                              writeRaw (name ++"-all-edge-null.txt") (map (map tot) simStochDesc)
-                                                                                                              writeRaw (name ++"-all-site-null.txt") (map (map tot) $ map transpose simStochDesc)
+                                                                                                      then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
+                                                                                                              writeRaw (name ++"-all-edge-null.txt") $ concat (map (map tot) simStochDesc)
+                                                                                                              writeRaw (name ++"-all-site-null.txt") $ concat (map (map tot) $ map transpose simStochDesc)
                                                                                                       else 
                                                                                                            return ()
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
@@ -231,7 +231,6 @@ main = do args <- getArgs
                Nothing -> return ()
 
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
-writeRaw2 filename list = writeFile filename $ intercalate "\n" $ map (intercalate "\n") $  map (map show) list
 
 renderableToPDFFileM mvar a b c d = do renderableToPDFFile a b c d
                                        putMVar mvar ()
