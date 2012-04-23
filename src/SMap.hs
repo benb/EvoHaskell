@@ -47,8 +47,10 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option [] ["thmm"] (OptArg thmmModelR "init params") "Use THMM model"
           , Option [] ["gamma"] (OptArg gammaModelR "init params") "Use Gamma model"
           , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data"
+          , Option [] ["raw"] (NoArg optRawR) "include raw data output"
             ]
 
+optRawR opt = return opt {optRaw = True }
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
@@ -87,7 +89,8 @@ data Options = Options  {
         optSeed :: Maybe Int,
         optLevel :: OptLevel,
         optModel :: Model,
-        optAlg :: OptAlg
+        optAlg :: OptAlg,
+        optRaw :: Bool
 } deriving Show
 
 defaultOptions :: Options
@@ -99,7 +102,8 @@ defaultOptions = Options {
         optSeed = Nothing,
         optLevel = BranchOpt,
         optModel = Thmm 1.0 0.1 1.0,
-        optAlg = OptNone
+        optAlg = OptNone,
+        optRaw = False
 }
 
 -- alpha sigma pInv | alpha
@@ -132,7 +136,8 @@ main = do args <- getArgs
                   optSeed = seed,
                   optLevel = optBoot,
                   optModel = modelParams,
-                  optAlg = optMethod
+                  optAlg = optMethod,
+                  optRaw = raw
           } = opts
           print seed
           print numSim
@@ -194,9 +199,13 @@ main = do args <- getArgs
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20))  simulations
                                                let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
                 --                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
-                                               let ansInter = stochmapTT (interLMat nClasses 20) t2
-                                               let ansIntra = stochmapTT (intraLMat nClasses 20) t2
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
+                                                                                              if raw
+                                                                                                      then do writeRaw2 (name ++"-all-raw-null.txt") simStochDesc
+                                                                                                              writeRaw (name ++"-all-edge-null.txt") (map (map tot) simStochDesc)
+                                                                                                              writeRaw (name ++"-all-site-null.txt") (map (map tot) $ map transpose simStochDesc)
+                                                                                                      else 
+                                                                                                           return ()
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                                                               let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
@@ -211,13 +220,18 @@ main = do args <- getArgs
                                                                                               takeMVar m1 
                                                                                               takeMVar m1 
                                                                                               takeMVar m1 
-                                               outputMat ("switch",simStochInter,ansInter)
+                                               let ansIntra = stochmapTT (intraLMat nClasses 20) t2
                                                outputMat ("subs",simStochIntra,ansIntra)
+                                               if (nClasses==1) 
+                                                 then return ()
+                                                 else outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
                                                return Nothing
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
 
+writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
+writeRaw2 filename list = writeFile filename $ intercalate "\n" $ map (intercalate "\n") $  map (map show) list
 
 renderableToPDFFileM mvar a b c d = do renderableToPDFFile a b c d
                                        putMVar mvar ()
