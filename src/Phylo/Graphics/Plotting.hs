@@ -16,9 +16,11 @@ chooseLineWidth SVG = 0.25
 
 makePlot :: [Double] -> [(Double,Double)] -> OutputType -> Renderable ()
 makePlot qD nf otype | trace ("makePlot " ++ ((show $ length qD) ++ " " ++ (show $ length nf))) True = toRenderable layout where                                                                                                                                                                                                 
-    layout = layout1_title ^="QQPlot"                                                                                                                                                                                                         
+    layout = layout1_title ^=""                                                                                                                                                                                                         
            $ layout1_background ^= solidFillStyle (opaque white)                                                                                                                                                                              
            $ layout1_left_axis ^: laxis_generate ^= const baxis
+           $ layout1_bottom_axis ^: laxis_title ^= "theoretical"
+           $ layout1_left_axis ^: laxis_title ^= "empirical"
            $ layout1_bottom_axis ^: laxis_generate ^= const baxis
            $ layout1_plots ^= [ Left (toPlot xEqualYLine)
                               , Left (toPlot qDPoints)                                                                                                                                                                                          
@@ -41,12 +43,12 @@ makePlot qD nf otype | trace ("makePlot " ++ ((show $ length qD) ++ " " ++ (show
 
     qDLine = plot_lines_style ^= lineStyle (opaque blue)                                                                                                                                                                                      
            $ plot_lines_values ^= [xyvals]                                                                                                                                                                                            
-           $ plot_lines_title ^= "empirical"                                                                                                                                                                                                  
+           $ plot_lines_title ^= ""                                                                                                                                                                                                  
            $ defaultPlotLines            
 
     qDPoints = plot_points_style ^= filledCircles 2 (opaque blue)                                                                                                                                                                                
            $ plot_points_values ^= xyvals
-           $ plot_points_title ^= "empirical"                                                                                                                                                                                                 
+           $ plot_points_title ^= ""                                                                                                                                                                                                 
            $ defaultPlotPoints   
 
     qDArea = plot_fillbetween_values ^= xyArea                                                                                                                                                 
