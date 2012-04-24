@@ -833,7 +833,10 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
                  
 data IterType = Full | BL | Params deriving (Eq, Show)
 
-optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-2 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
+--optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-2 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
+optBSParamsBL cutoff method numBSParam mapping initialStepSize = optWithBSIO' method [] cutoff numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
+optDefault = optBSParamsBL 1E-2
+
 getDeriv (curr,f,x,l,u) = getDeriv' 1E-6 curr f x l u
 
 --getDeriv' stepSize curr f x l u | trace ("getting deriv for " ++ (show x) ++ " " ++ (show [l,u])) False = undefined 
@@ -849,7 +852,7 @@ optWithBSIO' :: NLOptMethod -> [(Double,IterType)] -> Double -> (Int,Int) -> (Ma
 optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree startParams = ans where
      ans = case iterations of
                 x | trace ("Iterations " ++ show iterations ++ (show cutoff)) False -> undefined
-                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | trace ("Checking " ++ (show (x-x''')) ++ " " ++ (show cutoff)) $  (x-x''' < cutoff) && (t'''==Full || t''==Full || t'==Full ||  t==Full) -> (tree,startParams) --stop
+                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | trace ("Checking " ++ (show (x-x''')) ++ " " ++ (show cutoff)) $  (x-x''' < cutoff) && (cutoff > 0.05 || (t'''==Full || t''==Full || t'==Full ||  t==Full)) -> (tree,startParams) --stop
     --            ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && stepSizeMet -> return (tree,startParams) --stop
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams

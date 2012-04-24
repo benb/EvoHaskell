@@ -35,7 +35,7 @@ import Phylo.NLOpt
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
-data OptLevel = FullOpt | BranchOpt | QuickBranchOpt | NoOpt deriving Show
+data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
 
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
@@ -100,7 +100,7 @@ defaultOptions = Options {
         optNumCats = 4,
         optBootCount = 10,
         optSeed = Nothing,
-        optLevel = BranchOpt,
+        optLevel = FullOpt 1E-1,
         optModel = Thmm 1.0 0.1 1.0,
         optAlg = OptNone,
         optRaw = False
@@ -116,7 +116,7 @@ optNumCatsR arg opt = return opt {optNumCats = (read arg)}
 optBootCountR arg opt = return opt {optBootCount = (read arg)}
 optSeedR arg opt = return opt {optSeed = Just (read arg)}
 optFR arg opt = optFR' (map toLower arg) opt
-optFR' arg opt | arg=="full" = return opt {optLevel = FullOpt}
+optFR' arg opt | (take 4 arg)=="full" = return opt {optLevel = FullOpt (read $ drop 4 arg)}
                | arg=="branch" = return opt {optLevel = BranchOpt}
                | arg=="quick" = return opt {optLevel = QuickBranchOpt}
                | arg=="none" = return opt {optLevel = NoOpt}
@@ -164,7 +164,7 @@ main = do args <- getArgs
                                                let nState = nClasses * 20
                                                let (t2,params) = case optMethod of 
                                                                                        OptNone                        -> (t2',initparams)
-                                                                                       (OptMethod _)                  -> optF t2' initparams
+                                                                                       (OptMethod _)                  -> optF 1E-2 t2' initparams
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
                                                print $ "OK? " ++ (show (aX==bX))
@@ -178,13 +178,14 @@ main = do args <- getArgs
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens
                                                let simulations :: [DNode] = case (optBoot,optMethod) of 
-                                                                      (FullOpt,_) -> map (\x->fst $ optF x params) simulations'
+                                                                      (FullOpt level,_) -> map (\x->fst $ optF level x params) simulations'
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20))  simulations
-                                               let (simStochInter,simStochIntra) = unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
-                --                               let (simStochInter,simStochIntra) = unzip simS --using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                                               let (simStochInter,simStochIntra) = if (nClasses==1)
+                                                       then (undefined,(map snd simS) `using` parListChunk (numSim `div` Sync.numCapabilities) rdeepseq)
+                                                       else unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               if raw
                                                                                                       then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
@@ -207,9 +208,6 @@ main = do args <- getArgs
                                                                                               takeMVar m1 
                                                                                               takeMVar m1 
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               putStrLn "ansIntra"
-                                               print ansIntra
-                                               putStrLn "END ansIntra"
                                                outputMat ("subs",simStochIntra,ansIntra)
                                                if (nClasses==1) 
                                                  then return ()
@@ -296,13 +294,12 @@ joinWith i [x] = (show x)
 joinWith i [] = []
 
 stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[Double])
-stochmapOrder (condE,priorE) mapping priors = traceShow (condE,priorE) order where
+stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
                                                 fixProc pr x = foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x)
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
-                                                traceX y x = trace (show y ++ ":   " ++ (show x)) x 
 
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
 stochmapOut (condE',priorE') mapping priors f = do 
@@ -379,10 +376,10 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
-optGammaModel method cats pi s = optBSParamsBLIO method (0,0) (\x->0) [0.1] [Just 0.01] [Just 100.0] (flatPriors cats) model where                                                           
+optGammaModel method cats pi s cutoff = optBSParamsBL cutoff method (0,0) (\x->0) [0.1] [Just 0.01] [Just 100.0] (flatPriors cats) model where                                                           
         model = gammaModel cats s pi
                                 
-optThmmModel method numModels cats pi s t2 params = traceShow params $ optBSParamsBLIO method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
+optThmmModel method numModels cats pi s cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
         lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
         myModel = thmmModel (cats+1) s pi
@@ -391,12 +388,17 @@ optThmmModel method numModels cats pi s t2 params = traceShow params $ optBSPara
 --all the data needed is in modelTree
 --but this hack will 'recompress' the data
 --to site patterns
+--patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
+--                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
+--                             pAln = raceShow lAln $ pAlignment $ lAln
+--                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
+--
 patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
-                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
-                             pAln = traceShow lAln $ pAlignment $ lAln
-                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
+                             ans = makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
-getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts)
+
+getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts) where
+
 cramerVonMises empQ theQs = pvalue where
         v = fromIntegral $ length empQ
         cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (square (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
@@ -408,7 +410,7 @@ cramerVonMises empQ theQs = pvalue where
 stochmapT nProc nState aln' lM tree = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
         sitemap' = mapBack pAln'
         pAln' = pAlignment aln'
-        (nSite,nCols,multiplicites) = getAlnData pAln'
+        (nSite,nCols,multiplicites) = getAlnData pAln' --nCols >= nSite by stochmap.c definition.
         nBranch =  length $ toPBELengths pBEStr
         pBEStr = getPartialBranchEnds tree
         partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr
@@ -417,3 +419,5 @@ stochmapT nProc nState aln' lM tree = calculateStochmap nSite nState nBranch nPr
         pi_i' = map toList $ getPi tree
         branchLengths' = toPBELengths pBEStr
         mixProbs' = getPriors tree
+
+
