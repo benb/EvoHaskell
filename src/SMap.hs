@@ -401,7 +401,7 @@ getAlnData (PatternAlignment names seqs columns patterns counts) = (length count
 
 cramerVonMises empQ theQs = pvalue where
         v = fromIntegral $ length empQ
-        cram x = foldr (+) 0.0 $ map (\(w,i)-> w - (square (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
+        cram x = foldr (+) 0.0 $ map (\(w,i)->  (square $ w - (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
         wv2_emp = cram empQ
         wv2_thes = map cram theQs
         square x = x*x
