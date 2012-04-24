@@ -852,7 +852,8 @@ optWithBSIO' :: NLOptMethod -> [(Double,IterType)] -> Double -> (Int,Int) -> (Ma
 optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree startParams = ans where
      ans = case iterations of
                 x | trace ("Iterations " ++ show iterations ++ (show cutoff)) False -> undefined
-                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | trace ("Checking " ++ (show (x-x''')) ++ " " ++ (show cutoff)) $  (x-x''' < cutoff) && (cutoff > 0.05 || (t'''==Full || t''==Full || t'==Full ||  t==Full)) -> (tree,startParams) --stop
+    --            ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | ("Checking " ++ (show (x-x''')) ++ " " ++ (show cutoff)) False -> undefined
+                ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (cutoff > 0.05 || (t'''==Full || t''==Full || t'==Full ||  t==Full)) -> (tree,startParams) --stop
     --            ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && stepSizeMet -> return (tree,startParams) --stop
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
@@ -875,7 +876,8 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
-                                f x = trace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) where
+                                --f x = trace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) where
+                                f x = (ans,Just derivs) where
                                         (outTree,outFuncs) = myFunc x
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
@@ -889,7 +891,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT3 priors (fromJust mapping) numBSParam model tree
                                 --f x = trace ((show x) ++ " -> " ++ (show ans)) (ans,Just derivs) where
-                                f x = trace ((show x) ++ " -> " ++ (show ans)) (ans,Just derivs) where
+                                f x = (ans,Just derivs) where
                                         (outTree,outFuncs) = myFunc x
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower' upper'
