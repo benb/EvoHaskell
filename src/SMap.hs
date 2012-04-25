@@ -33,6 +33,7 @@ import Control.Parallel.Strategies
 import Data.Time.Clock
 import Phylo.NLOpt
 import System.ProgressBar
+import Text.Printf
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -125,6 +126,23 @@ optFR' arg opt | (take 4 arg)=="full" = return opt {optLevel = FullOpt (read $ d
 
 ---
 
+printNiceOpt len (x,x') = do
+   let string = getNiceOpt2 len x x'
+   let cr = string `deepseq` '\r'
+   putChar cr
+   putStr (replicate len ' ')
+   putChar cr
+   putStr string
+
+getNiceOpt len (a,b,c) = outL ++ outR where
+                                outL = (show c) ++ " : " ++ (format $ logLikelihood a)
+                                outR = replicate (len - (length outL)) ' '
+                                format = printf "%.5f"
+
+getNiceOpt2 len (a,b,c) (a',b',c') = outL ++ outR where
+                                        outL = (show c') ++ " : " ++ (format $ logLikelihood a) ++ " -> " ++ (format $ logLikelihood a')
+                                        format = printf "%.5f"
+                                        outR = replicate (len - (length outL)) ' '
 main = do args <- getArgs
           let ( actions, nonOpts, msgs ) = getOpt Permute options args
           opts <- foldl (>>=) (return defaultOptions) actions
@@ -170,7 +188,14 @@ main = do args <- getArgs
                                                (t2,params) <- case optMethod of 
                                                                                        OptNone                        -> return $ (t2',initparams)
                                                                                        (OptMethod _)                  -> do putStrLn "optimising model"
-                                                                                                                            return $ optF tol t2' initparams
+                                                                                                                            let ans = optF tol t2' initparams
+                                                                                                                            let start = head ans
+                                                                                                                            putStr $ getNiceOpt 100 $ head ans
+                                                                                                                            mapM (\x -> do putChar '\r'
+                                                                                                                                           printNiceOpt 100 x) (zip ans (tail ans))
+                                                                                                                            let (a,b,_) = last ans
+                                                                                                                            putStrLn ""
+                                                                                                                            return (a,b)
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
                                                --print $ "OK? " ++ (show (aX==bX))
@@ -185,7 +210,7 @@ main = do args <- getArgs
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens
                                                let simulations :: [DNode] = case (optBoot,optMethod) of 
-                                                                      (FullOpt level,_) -> map (\x->fst $ optF level x params) simulations'
+                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $  map (\x->last $ optF level x params) simulations'
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
