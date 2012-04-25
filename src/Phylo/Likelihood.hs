@@ -405,7 +405,7 @@ optBLD = optBLDx optLeftBL
 optBLD0 = optBLDx (optLeftBLx 0)
 
 optBLDFull0 :: DNode -> DNode
-optBLDFull0 t | trace ("Start Opt " ++ (show t)) True = optBLDFull  (optLeftBLx 0) t
+optBLDFull0 t = optBLDFull  (optLeftBLx 0) t
 optBLDFull f tree = optBLDFull' (logLikelihood tree) 1E-05 f tree
 optBLDFull' old cutoff f tree = case (new - old) of 
         x | x > cutoff -> optBLDFull' new cutoff f newtree
@@ -851,7 +851,7 @@ getDeriv' stepSize curr f x l u = case (u,l) of
 optWithBSIO' :: NLOptMethod -> [(Double,IterType)] -> Double -> (Int,Int) -> (Maybe (DNode -> Int)) -> [Double] -> [Double] -> [Maybe Double] -> [Maybe Double] -> [Double] -> ModelF -> DNode -> [Double] -> (DNode,[Double])
 optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree startParams = ans where
      ans = case iterations of
-                x | trace ("Iterations " ++ show iterations ++ (show cutoff)) False -> undefined
+                --x | trace ("Iterations " ++ show iterations ++ (show cutoff)) False -> undefined
     --            ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | ("Checking " ++ (show (x-x''')) ++ " " ++ (show cutoff)) False -> undefined
                 ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (cutoff > 0.05 || (t'''==Full || t''==Full || t'==Full ||  t==Full)) -> (tree,startParams) --stop
     --            ((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) && (t'''==Full || t==Full) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
@@ -862,7 +862,8 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
-                                f x = trace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) where
+                                f x = (ans,Just derivs) where
+                                --f x = trace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) where
                                         (outTree,outFuncs) = myFunc x
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
@@ -901,14 +902,14 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 upper' = (replicate numBL $ Just 50.0) ++ upper
                                 addBL p = myBL ++ startParams
                                 dropBL p = drop numBL p
-                list@[] -> trace "BL OPT" $ optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
+                list@[] -> optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
                                 startTree = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams                                            
-                                tree' | trace ("START BL " ++ (show startTree) ++ "\n" ++ (show $ logLikelihood startTree)) True = optBLDFull' (logLikelihood startTree) 1E-2 (optLeftBLx 0) startTree                                       
+                                tree' = optBLDFull' (logLikelihood startTree) 1E-2 (optLeftBLx 0) startTree                                       
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
-                list -> trace "BL OPT" $ optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
+                list -> optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
                                 startTree = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams                                            
-                                tree' | trace ("START BL " ++ (show startTree) ++ "\n" ++ (show $ logLikelihood startTree)) True = optBLDFull0 startTree                                       
+                                tree' = optBLDFull0 startTree                                       
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
      incrementStepSize ss = map (\(x,y) -> max x y) $ zip limitStepSize $ map (/10) ss

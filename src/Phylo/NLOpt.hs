@@ -61,21 +61,21 @@ neldermead = unsafeNlopt neldermead_
 praxis = unsafeNlopt praxis_
 newuoa = unsafeNlopt newuoa_
 
-traceX a x = trace (show a ++ (show x)) x
-traceXm a = liftM (traceX a)
+--traceX a x = trace (show a ++ (show x)) x
+--traceXm a = liftM (traceX a)
 unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ nlopt met stepSize xtol params f lower upper 
 
 nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 
                                                   stepSize' <- newArray $ map realToFrac stepSize
-                                                  let np = trace ("Start params " ++ (show params) ++ " np " ++ (show (length params))) $ length params
+                                                  let np = length params
                                                   let f' a b c d = do (ans,deriv)<-(liftM (invert2 f)) (fmap (map realToFrac) $ peekArray np b)
                                                                       case c of 
                                                                             x | x==nullPtr -> return ()
                                                                             ptr -> pokeArray ptr $ map realToFrac $ fromJust deriv
                                                                       return $ realToFrac ans
                                                   f'' <- wrap f'
-                                                  startP <- newArray $ traceX ("realToFrac") $ map (realToFrac) params
+                                                  startP <- newArray $ map (realToFrac) params
                                                   let retCode = fromIntegral $ met (realToFrac xtol) stepSize' startP (fromIntegral np) f'' lower' upper' 
                                                   ans <- seq retCode $ fmap (map realToFrac) $ peekArray np startP
                                                   freeHaskellFunPtr f''

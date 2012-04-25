@@ -32,6 +32,7 @@ import Data.Char
 import Control.Parallel.Strategies
 import Data.Time.Clock
 import Phylo.NLOpt
+import System.ProgressBar
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -154,6 +155,7 @@ main = do args <- getArgs
                                      return Nothing
                 (Just a,Right t,paramT)->   do let method = bobyqa
                                                let pAln = pAlignment a
+                                               hSetBuffering stdout NoBuffering
                                                let piF = fromList $ safeScaledAAFrequencies a
                                                let (modelF,initparams,qsetF,optF) = case modelParams of 
                                                                                 Thmm a b c -> (thmmModel (cats+1) wagS piF,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) wagS piF x]), optThmmModel method 1 cats piF wagS)
@@ -162,15 +164,20 @@ main = do args <- getArgs
                                                                                 Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
                                                                                 Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
                                                let nState = nClasses * 20
-                                               let (t2,params) = case optMethod of 
-                                                                                       OptNone                        -> (t2',initparams)
-                                                                                       (OptMethod _)                  -> optF 1E-2 t2' initparams
+                                               let tol = case optBoot of
+                                                                (FullOpt level) -> min level 1E-2
+                                                                _               -> 1E-2
+                                               (t2,params) <- case optMethod of 
+                                                                                       OptNone                        -> return $ (t2',initparams)
+                                                                                       (OptMethod _)                  -> do putStrLn "optimising model"
+                                                                                                                            return $ optF tol t2' initparams
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
-                                               print $ "OK? " ++ (show (aX==bX))
-                                               putStrLn "END"
+                                               --print $ "OK? " ++ (show (aX==bX))
+                                               if (aX/=bX)
+                                                       then error "Bug in smap, please report"
+                                                       else return $ ()
                                                let nProc = length priors
-                                               putStrLn $ show $ zip [0..] $ getCols pAln 
                                                let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT nProc nState (getAln tree) lM tree) (treeToMap tree) (getPriors tree)
                                                let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT nProc nState a lM tree) (treeToMap tree) (getPriors tree)
                                                let numQuantile = 500
@@ -182,10 +189,16 @@ main = do args <- getArgs
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
-                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20))  simulations
+                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
+                                               let numThreads = case Sync.numCapabilities of
+                                                                        1 -> 1
+                                                                        2 -> 2
+                                                                        x -> x - 1
                                                let (simStochInter,simStochIntra) = if (nClasses==1)
-                                                       then (undefined,(map snd simS) `using` parListChunk (numSim `div` Sync.numCapabilities) rdeepseq)
-                                                       else unzip (simS `using` (parListChunk (numSim `div` Sync.numCapabilities) rdeepseq))
+                                                       then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
+                                                       else unzip (simS `using` parBuffer numThreads rdeepseq)
+                                               outputProgressInit 50 (fromIntegral numSim)
+                                               outputProgress 50 (fromIntegral numSim) 1 simStochIntra
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               if raw
                                                                                                       then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
@@ -216,6 +229,14 @@ main = do args <- getArgs
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
+
+--outputProgress :: Int -> [a] -> IO ()
+outputProgressInit width numSim = putStr $ mkProgressBar (msg "bootstrapping")  exact width 0 numSim
+outputProgress width numSim i [] = putStrLn "" --progressBar (msg "bootstrapping") exact width i numSim
+outputProgress width numSim i (x:xs) = do let m = x `seq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
+                                          putChar '\r'
+                                          putStr m
+                                          outputProgress width numSim (i+1) xs
 
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
 
