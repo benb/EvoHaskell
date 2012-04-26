@@ -24,6 +24,8 @@ import Numeric.GSL.OneDimensionalMinimization
 import qualified Data.Vector as DVec
 import Data.Vector ((!))
 import Numeric.LinearAlgebra.LAPACK
+import Control.Parallel.Strategies
+import Control.DeepSeq
 
 
 -- |Combine two sets of partial likelihoods along two branches
@@ -152,7 +154,7 @@ mapBack :: PatternAlignment -> [Int]
 mapBack (PatternAlignment _ _ columns patterns _) = map (\x->fromJust $ findIndex (==x) patterns) columns
 
 calcPL :: DNode -> DNode -> [Double] -> [BranchModel] -> [Matrix Double]
-calcPL left right dist model = allPLC (map (\x-> fst $ x dist) model) $ allCombine (getPL left) (getPL right) 
+calcPL left right dist model = (allPLC (map (\x-> fst $ x dist) model) $ allCombine (getPL left) (getPL right)) 
 calcLeafPL :: Matrix Double -> [Double] -> [BranchModel] -> [Matrix Double]
 calcLeafPL tips dist model = map (\pT -> rawPartialLikelihoodCalc pT tips) $ (map (\x -> fst $ x dist) model)
 calcRootPL left middle right = allCombine (getPL middle) $ allCombine (getPL left) (getPL right)
@@ -207,12 +209,13 @@ restructDataMapped leaf@(DLeaf name dist sequence partial _ _) model priors pi  
                                                                                partial' = calcLeafPL partial dist myModel
                                                                                myModel = model leaf
 
-restructDataMapped inode@(DINode left right dist _ _ ) model priors pi= newleft `par` newright `par` DINode newleft newright dist myModel partial where
+restructDataMapped inode@(DINode left right dist _ _ ) model priors pi= DINode newleft newright dist myModel partial where
                                                             partial = calcPL newleft newright dist myModel
                                                             myModel = model inode
                                                             newleft = restructDataMapped left model priors pi
                                                             newright = restructDataMapped right model priors pi
-restructDataMapped tree@(DTree left middle right _ pc _ _ ) model priors pi = newleft `par` newright `par` newmiddle `par` DTree newleft newmiddle newright partial pc priors pi where 
+restructDataMapped tree@(DTree left middle right _ pc _ _ ) model priors pi = ([newleft,newmiddle,newright] `using` parList rseq) `seq` DTree newleft newmiddle newright partial pc priors pi where 
+--restructDataMapped tree@(DTree left middle right _ pc _ _ ) model priors pi = DTree newleft newmiddle newright partial pc priors pi where 
                                             partial = calcRootPL newleft newmiddle newright
                                             newleft = restructDataMapped left model priors pi
                                             newright = restructDataMapped right model priors pi
@@ -356,7 +359,11 @@ instance Show DNode where
         show (DINode l r d _ _) = "(" ++ (show l)++","++(show r)++"):"++(show d)
         show (DLeaf name [d] _ _ _ _) = name++":"++(show d)
         show (DLeaf name d _ _ _ _) = name++":"++(show d)
-
+--instance NFData DNode where
+--        rnf (DTree l m r mats ints doubles vectors) = rnf l `seq` rnf m `seq` rnf r `seq` rnf (map toLists mats) `seq` rnf ints `seq` rnf doubles `seq` rnf (map toList vectors) `seq` ()
+--        rnf (DINode l r doubles models mats) rnf l `seq` rnf r `seq` rnf doubles `seq` rnf models `seq` rnf (map toLists mats) `seq` ()
+--        rnf (DLeaf string doubles s2 mat bms mats) = rnf string `seq` rnf doubles `seq` rnf s2 `seq` rnf (toLists mat) `seq` rnf bms `seq` rnf (map toLists mats) `seq` ()
+--
 
 class AddTree a where
         addModel :: (AddTree a) => a -> [BranchModel] -> [Double] -> [Vector Double] -> DNode

@@ -11,6 +11,7 @@ import Debug.Trace
 import Control.Applicative
 import Data.Maybe
 import Foreign.Marshal
+import Control.Concurrent
 
 
 foreign import ccall safe "nlopt_c opt_bobyqa" 
@@ -38,7 +39,7 @@ foreign import ccall safe "nlopt_c opt_neldermead"
 foreign import ccall safe "nlopt_c opt_newuoa"
         newuoa_ :: CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt
 
-foreign import ccall "wrapper"
+foreign import ccall safe "wrapper"
         wrap :: (CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble) -> IO (FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)))
 
 unsafeNlopt :: (CDouble -> Ptr CDouble -> Ptr CDouble -> CUInt -> FunPtr ((CUInt -> Ptr CDouble -> Ptr CDouble -> Ptr () -> IO CDouble)) -> Ptr CDouble -> Ptr CDouble -> CInt) -> NLOptMethod -- [Double] -> Double ->  [Double] -> ([Double] -> (Double,Maybe [Double])) -> [Maybe Double] -> [Maybe Double] -> IO ([Double],Int)
@@ -63,7 +64,7 @@ newuoa = unsafeNlopt newuoa_
 
 --traceX a x = trace (show a ++ (show x)) x
 --traceXm a = liftM (traceX a)
-unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ nlopt met stepSize xtol params f lower upper 
+unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ runInBoundThread $ nlopt met stepSize xtol params f lower upper 
 
 nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 

@@ -215,15 +215,17 @@ main = do args <- getArgs
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
-                                               let numThreads = case Sync.numCapabilities of
-                                                                        1 -> 1
-                                                                        2 -> 2
-                                                                        x -> x - 1
+                                               let numThreads = Sync.numCapabilities `div` 2
                                                let (simStochInter,simStochIntra) = if (nClasses==1)
-                                                       then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
-                                                       else unzip (simS `using` parBuffer numThreads rdeepseq)
+                                                       then if (numThreads > 1)
+                                                                then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
+                                                                else (undefined,map snd simS)
+                                                       else if (numThreads >1) 
+                                                                then unzip (simS `using` parBuffer numThreads rdeepseq)
+                                                                else unzip simS
                                                outputProgressInit 50 (fromIntegral numSim)
                                                outputProgress 50 (fromIntegral numSim) 1 simStochIntra
+                                               exitSuccess
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               if raw
                                                                                                       then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
@@ -242,14 +244,16 @@ main = do args <- getArgs
                                                                                               forkIO $ renderableToPDFFileM m1 (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
                                                                                               forkIO $ renderableToPDFFileM m1 (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
                                                                                               forkIO $ renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
-                                                                                              takeMVar m1 
-                                                                                              takeMVar m1 
-                                                                                              takeMVar m1 
+                                                                                              return m1
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               outputMat ("subs",simStochIntra,ansIntra)
+                                               putStr "Making plots..."
+                                               m1<-outputMat ("subs",simStochIntra,ansIntra)
                                                if (nClasses==1) 
                                                  then return ()
-                                                 else outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
+                                                 else do m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
+                                                         mapM_ (const $ takeMVar m2) [1..3] 
+                                               mapM_ (const $ takeMVar m1) [1..3] 
+                                               putStrLn " done"
                                                return Nothing
           case output of
                Just str -> putStrLn str

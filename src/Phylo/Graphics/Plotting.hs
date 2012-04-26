@@ -15,7 +15,7 @@ chooseLineWidth PS = 0.25
 chooseLineWidth SVG = 0.25             
 
 makePlot :: [Double] -> [(Double,Double)] -> OutputType -> Renderable ()
-makePlot qD nf otype | trace ("makePlot " ++ ((show $ length qD) ++ " " ++ (show $ length nf))) True = toRenderable layout where                                                                                                                                                                                                 
+makePlot qD nf otype = toRenderable layout where                                                                                                                                                                                                 
     layout = layout1_title ^=""                                                                                                                                                                                                         
            $ layout1_background ^= solidFillStyle (opaque white)                                                                                                                                                                              
            $ layout1_left_axis ^: laxis_generate ^= const baxis
