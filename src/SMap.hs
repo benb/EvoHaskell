@@ -215,7 +215,7 @@ main = do args <- getArgs
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
-                                               let numThreads = Sync.numCapabilities `div` 2
+                                               let numThreads = Sync.numCapabilities
                                                let (simStochInter,simStochIntra) = if (nClasses==1)
                                                        then if (numThreads > 1)
                                                                 then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
@@ -225,7 +225,6 @@ main = do args <- getArgs
                                                                 else unzip simS
                                                outputProgressInit 50 (fromIntegral numSim)
                                                outputProgress 50 (fromIntegral numSim) 1 simStochIntra
-                                               exitSuccess
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               if raw
                                                                                                       then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
