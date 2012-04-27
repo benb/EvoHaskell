@@ -50,9 +50,12 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option [] ["gamma"] (OptArg gammaModelR "init params") "Use Gamma model"
           , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data"
           , Option [] ["raw"] (NoArg optRawR) "include raw data output"
+          , Option ['D'] ["debug"] (NoArg optLogR) "debugging output"
             ]
 
+
 optRawR opt = return opt {optRaw = True }
+optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr}
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
@@ -92,9 +95,17 @@ data Options = Options  {
         optLevel :: OptLevel,
         optModel :: Model,
         optAlg :: OptAlg,
-        optRaw :: Bool
+        optRaw :: Bool,
+        optLog :: Logger
 } deriving Show
 
+nullOut :: Logger
+nullOut = Logger n where
+        n _  = return ()
+
+newtype Logger = Logger (String -> IO ())
+instance Show Logger where
+        show x = ""
 defaultOptions :: Options
 defaultOptions = Options {
         optAln = "in.fa",
@@ -105,7 +116,8 @@ defaultOptions = Options {
         optLevel = FullOpt 1E-1,
         optModel = Thmm 1.0 0.1 1.0,
         optAlg = OptNone,
-        optRaw = False
+        optRaw = False,
+        optLog = nullOut 
 }
 
 -- alpha sigma pInv | alpha
@@ -156,8 +168,10 @@ main = do args <- getArgs
                   optLevel = optBoot,
                   optModel = modelParams,
                   optAlg = optMethod,
-                  optRaw = raw
+                  optRaw = raw,
+                  optLog = log
           } = opts
+          let (Logger logger) = log
           print seed
           print numSim
           print cats 
@@ -196,6 +210,9 @@ main = do args <- getArgs
                                                                                                                             let (a,b,_) = last ans
                                                                                                                             putStrLn ""
                                                                                                                             return (a,b)
+
+                                               logger $ "Main model params " ++ (show params)
+                                               logger $ show params
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
                                                --print $ "OK? " ++ (show (aX==bX))
