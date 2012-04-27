@@ -185,7 +185,8 @@ main = do args <- getArgs
                                     return Nothing
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
-                (Just a,Right t,paramT)->   do let method = bobyqa
+                (Just a,Right t,paramT)->   do logger "Debugging enabled"
+                                               let method = bobyqa
                                                let pAln = pAlignment a
                                                hSetBuffering stdout NoBuffering
                                                let piF = fromList $ safeScaledAAFrequencies a
@@ -212,7 +213,6 @@ main = do args <- getArgs
                                                                                                                             return (a,b)
 
                                                logger $ "Main model params " ++ (show params)
-                                               logger $ show params
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
                                                --print $ "OK? " ++ (show (aX==bX))
@@ -227,7 +227,7 @@ main = do args <- getArgs
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations' = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens
                                                let simulations :: [DNode] = case (optBoot,optMethod) of 
-                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $  map (\x->last $ optF level x params) simulations'
+                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $ map (\x->last $ optF level x params) simulations'
                                                                       (BranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 simulations'
                                                                       (NoOpt,_) -> simulations'
@@ -240,15 +240,13 @@ main = do args <- getArgs
                                                        else if (numThreads >1) 
                                                                 then unzip (simS `using` parBuffer numThreads rdeepseq)
                                                                 else unzip simS
-                                               outputProgressInit 50 (fromIntegral numSim)
-                                               outputProgress 50 (fromIntegral numSim) 1 simStochIntra
+                                               outputProgressInit 100 (fromIntegral numSim)
+                                               let logY (x,y) = do logger $ "Simmodel params " ++ (show y)
+                                               outputProgress logY 100 (fromIntegral numSim) 1 (zip simStochIntra simS)
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
-                                                                                              if raw
-                                                                                                      then do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
-                                                                                                              writeRaw (name ++"-all-edge-null.txt") $ concat (map (map tot) simStochDesc)
-                                                                                                              writeRaw (name ++"-all-site-null.txt") $ concat (map (map tot) $ map transpose simStochDesc)
-                                                                                                      else 
-                                                                                                           return ()
+                                                                                              when raw $ do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
+                                                                                                            writeRaw (name ++"-all-edge-null.txt") $ concat (map (map tot) simStochDesc)
+                                                                                                            writeRaw (name ++"-all-site-null.txt") $ concat (map (map tot) $ map transpose simStochDesc)
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                                                               let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
@@ -264,10 +262,8 @@ main = do args <- getArgs
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
                                                putStr "Making plots..."
                                                m1<-outputMat ("subs",simStochIntra,ansIntra)
-                                               if (nClasses==1) 
-                                                 then return ()
-                                                 else do m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
-                                                         mapM_ (const $ takeMVar m2) [1..3] 
+                                               unless (nClasses==1) $ do m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
+                                                                         mapM_ (const $ takeMVar m2) [1..3] 
                                                mapM_ (const $ takeMVar m1) [1..3] 
                                                putStrLn " done"
                                                return Nothing
@@ -277,11 +273,12 @@ main = do args <- getArgs
 
 --outputProgress :: Int -> [a] -> IO ()
 outputProgressInit width numSim = putStr $ mkProgressBar (msg "bootstrapping")  exact width 0 numSim
-outputProgress width numSim i [] = putStrLn "" --progressBar (msg "bootstrapping") exact width i numSim
-outputProgress width numSim i (x:xs) = do let m = x `seq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
-                                          putChar '\r'
-                                          putStr m
-                                          outputProgress width numSim (i+1) xs
+outputProgress f width numSim i [] = putStrLn "" --progressBar (msg "bootstrapping") exact width i numSim
+outputProgress f width numSim i (x:xs) = do let m = x `seq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
+                                            f x 
+                                            putChar '\r'
+                                            putStr m
+                                            outputProgress f width numSim (i+1) xs
 
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
 
