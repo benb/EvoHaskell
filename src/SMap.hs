@@ -225,13 +225,13 @@ main = do args <- getArgs
                                                let numQuantile = 500
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               let simulations' = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens
-                                               let simulations :: [DNode] = case (optBoot,optMethod) of 
-                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $ map (\x->last $ optF level x params) simulations'
-                                                                      (BranchOpt,_) -> map optBLDFull0 simulations'
-                                                                      (QuickBranchOpt,_) -> map optBLDFull0 simulations'
-                                                                      (NoOpt,_) -> simulations'
-                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
+                                               let simulations s = case (optBoot,optMethod) of 
+                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $ map (\x->last $ optF level x params) $ simulate s
+                                                                      (BranchOpt,_) -> map optBLDFull0 $ simulate s
+                                                                      (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
+                                                                      (NoOpt,_) -> simulate s 
+                                                                      where simulate x = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
+                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
                                                let numThreads = Sync.numCapabilities
                                                let (simStochInter,simStochIntra) = if (nClasses==1)
                                                        then if (numThreads > 1)
@@ -242,7 +242,7 @@ main = do args <- getArgs
                                                                 else unzip simS
                                                outputProgressInit 100 (fromIntegral numSim)
                                                let logY (x,y) = do logger $ "Simmodel params " ++ (show y)
-                                               outputProgress logY 100 (fromIntegral numSim) 1 (zip simStochIntra simS)
+                                               outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               when raw $ do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
                                                                                                             writeRaw (name ++"-all-edge-null.txt") $ concat (map (map tot) simStochDesc)
@@ -270,6 +270,7 @@ main = do args <- getArgs
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
+
 
 --outputProgress :: Int -> [a] -> IO ()
 outputProgressInit width numSim = putStr $ mkProgressBar (msg "bootstrapping")  exact width 0 numSim
