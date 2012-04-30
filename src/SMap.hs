@@ -83,7 +83,7 @@ gammaModelR arg opt | trace "THMM found" True  = case arg of
                                         a -> return opt { optModel = Ras a }
 
 
-optNoneR opt = return opt {optAlg = OptMethod var2 }
+optNoneR opt = return opt {optAlg = OptNone}
 optAlgR arg opt = case arg of 
                         Nothing -> return opt {optAlg = OptMethod var2}
                         Just name -> return opt {optAlg = OptMethod met} where 
@@ -202,7 +202,9 @@ main = do args <- getArgs
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
                 (Just a,Right t,paramT)->   do logger "Debugging enabled"
-                                               let method = bobyqa
+                                               let method = case optMethod of 
+                                                        (OptMethod a) -> a
+                                                        _             -> bobyqa
                                                let pAln = pAlignment a
                                                hSetBuffering stdout NoBuffering
                                                let piF = fromList $ safeScaledAAFrequencies a
@@ -260,9 +262,12 @@ main = do args <- getArgs
                                                let logY (x,y) = do logger $ "Simmodel params " ++ (show y)
                                                outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
-                                                                                              when raw $ do writeRaw (name ++"-all-raw-null.txt") $ (concat . concat) simStochDesc
-                                                                                                            writeRaw (name ++"-all-edge-null.txt") $ concat (map (map tot) simStochDesc)
-                                                                                                            writeRaw (name ++"-all-site-null.txt") $ concat (map (map tot) $ map transpose simStochDesc)
+                                                                                              when raw $ do writeRaw (name ++"-boot-raw.txt") $ (concat . concat) simStochDesc
+                                                                                                            writeRaw (name ++"-boot-edge.txt") $ concat (map (map tot) simStochDesc)
+                                                                                                            writeRaw (name ++"-boot-site.txt") $ concat (map (map tot) $ map transpose simStochDesc)
+                                                                                                            writeRaw (name ++"-real-raw.txt") $ concat ansDesc
+                                                                                                            writeRaw (name ++"-real-edge.txt") $ map tot ansDesc
+                                                                                                            writeRaw (name ++"-real-site.txt") $ map tot $ transpose ansDesc
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                                                               let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
@@ -276,11 +281,17 @@ main = do args <- getArgs
                                                                                               forkIO $ renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
                                                                                               return m1
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               putStr "Making plots..."
+                                               let prog mVar x = do takeMVar mVar
+                                                                    progressBar (msg "plotting") exact 100 0 x 
                                                m1<-outputMat ("subs",simStochIntra,ansIntra)
-                                               unless (nClasses==1) $ do m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
-                                                                         mapM_ (const $ takeMVar m2) [1..3] 
-                                               mapM_ (const $ takeMVar m1) [1..3] 
+                                               if (nClasses==1) 
+                                                       then do putStr $ mkProgressBar (msg "plotting") exact 100 0 3
+                                                               mapM_ (prog m1) [1..3]
+                                                       else do putStr $ mkProgressBar (msg "plotting") exact 100 0 6
+                                                               m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
+                                                               mapM_ (prog m1) [1..3]
+                                                               mapM_ (prog m2) [4..6] 
+                                               putStrLn ""
                                                putStrLn " done"
                                                return Nothing
           case output of
