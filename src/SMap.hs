@@ -48,13 +48,28 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
           , Option [] ["thmm"] (OptArg thmmModelR "init params") "Use THMM model"
           , Option [] ["gamma"] (OptArg gammaModelR "init params") "Use Gamma model"
-          , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data"
+          , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data (default)"
+          , Option [] ["noopt"] (NoArg optNoneR) "Don't optimise model for real data"
           , Option [] ["raw"] (NoArg optRawR) "include raw data output"
           , Option ['D'] ["debug"] (NoArg optLogR) "debugging output"
+          , Option ['h'] ["help"] (NoArg printHelp) "print help"
             ]
 
 
-optRawR opt = return opt {optRaw = True }
+printHelp opt = do putStrLn $ usageInfo header options
+                   putStrLn example
+--                   putStrLn reference
+                   exitSuccess where
+                       header = unlines ["SMap: Graphical checking of covarion models using stochastic mapping"
+                                        ,""]
+                       example = unlines ["Examples:","Optimise and check a THMM model using 200 bootstrap replicates"
+                                         ,"Generated from model ef1.phy and tree ef1.tre"
+                                         ,""
+                                         ,"smap -a ef1.phy -t ef1.tre --thmm --bootstrap 50 --opt-bootstrap --opt"
+                                         ]
+--                       reference = unlines ["Graphical checking of covarion models using stochastic mapping"
+--                                           ,"Benjamin P. Blackburne, Simon Whelan, and Matthew Spencer"]
+optRawR opt = return opt {optRaw = True}
 optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr}
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
@@ -68,6 +83,7 @@ gammaModelR arg opt | trace "THMM found" True  = case arg of
                                         a -> return opt { optModel = Ras a }
 
 
+optNoneR opt = return opt {optAlg = OptMethod var2 }
 optAlgR arg opt = case arg of 
                         Nothing -> return opt {optAlg = OptMethod var2}
                         Just name -> return opt {optAlg = OptMethod met} where 
@@ -115,7 +131,7 @@ defaultOptions = Options {
         optSeed = Nothing,
         optLevel = FullOpt 1E-1,
         optModel = Thmm 1.0 0.1 1.0,
-        optAlg = OptNone,
+        optAlg = OptMethod var2,
         optRaw = False,
         optLog = nullOut 
 }
@@ -452,13 +468,13 @@ optThmmModel method numModels cats pi s cutoff t2 params = optBSParamsBL cutoff 
 --all the data needed is in modelTree
 --but this hack will 'recompress' the data
 --to site patterns
---patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
---                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
---                             pAln = raceShow lAln $ pAlignment $ lAln
---                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
---
 patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
-                             ans = makeSimulatedTree AminoAcid classes stdGen len modelTree 
+                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
+                             pAln = pAlignment $ lAln
+                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
+
+--patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
+--                             ans = makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
 
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts) where
