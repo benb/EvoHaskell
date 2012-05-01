@@ -38,6 +38,7 @@ import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
+data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String deriving Show
 
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
@@ -53,6 +54,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option [] ["raw"] (NoArg optRawR) "include raw data output"
           , Option ['D'] ["debug"] (NoArg optLogR) "debugging output"
           , Option ['h'] ["help"] (NoArg printHelp) "print help"
+          , Option ['m'] ["model"] (ReqArg optSubR "SUBMODEL") "model (wag or wag,F (default) or jtt or jtt,F or <customFile> or <customFile>,F)"
             ]
 
 
@@ -72,6 +74,21 @@ printHelp opt = do putStrLn $ usageInfo header options
 optRawR opt = return opt {optRaw = True}
 optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr,
                           optDebug = True}
+
+optSubR arg opt = do let model = case arg of 
+                                        "jtt" -> JTT
+                                        "jtt,F" -> JTTF
+                                        "wag" -> WAG
+                                        "wag,F" -> WAGF
+                                        x | (isF x) -> CustomSF (reverse $ drop 2 $ reverse $ x)
+                                          | otherwise -> CustomS x
+                     return opt {optSub = model}  where
+                     isF (x:y:[]) = [x,y] == ",F"
+                     isF (x:xs) = isF xs
+                     isF [] = False
+
+                                        
+                                        
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
@@ -114,7 +131,8 @@ data Options = Options  {
         optAlg :: OptAlg,
         optRaw :: Bool,
         optLog :: Logger,
-        optDebug :: Bool
+        optDebug :: Bool,
+        optSub :: SubModel
 } deriving Show
 
 nullOut :: Logger
@@ -136,7 +154,8 @@ defaultOptions = Options {
         optAlg = OptMethod var2,
         optRaw = False,
         optLog = nullOut,
-        optDebug = False
+        optDebug = False,
+        optSub = WAGF
 }
 
 -- alpha sigma pInv | alpha
@@ -174,6 +193,18 @@ getNiceOpt2 len (a,b,c) (a',b',c') = outL ++ outR where
                                         outL = (show c') ++ " : " ++ (format $ logLikelihood a) ++ " -> " ++ (format $ logLikelihood a')
                                         format = printf "%.5f"
                                         outR = replicate (len - (length outL)) ' '
+
+
+getSub model a = do let piF = fromList $ safeScaledAAFrequencies a
+                    case model of 
+                                 WAGF -> return (wagS,piF)
+                                 WAG -> return (wagS,wagPi)
+                                 JTT -> return (jttS,jttPi)
+                                 JTTF -> return (jttS,piF)
+                                 CustomS x -> parsePamlDatIO x
+                                 CustomSF x -> do (s,pi) <- parsePamlDatIO x
+                                                  return (s,piF)
+
 main = do args <- getArgs
           let ( actions, nonOpts, msgs ) = getOpt Permute options args
           opts <- foldl (>>=) (return defaultOptions) actions
@@ -188,7 +219,8 @@ main = do args <- getArgs
                   optAlg = optMethod,
                   optRaw = raw,
                   optLog = log,
-                  optDebug = debugging
+                  optDebug = debugging,
+                  optSub = subModel
           } = opts
           let (Logger logger) = log
           logger $ show opts
@@ -215,10 +247,10 @@ main = do args <- getArgs
                                                         _             -> bobyqa
                                                let pAln = pAlignment a
                                                hSetBuffering stdout NoBuffering
-                                               let piF = fromList $ safeScaledAAFrequencies a
+                                               (sMat,pi) <- getSub subModel a 
                                                let (modelF,initparams,qsetF,optF) = case modelParams of 
-                                                                                Thmm a b c -> (thmmModel (cats+1) wagS piF,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) wagS piF x]), optThmmModel method 1 cats piF wagS)
-                                                                                Ras a -> (gammaModel cats wagS piF,[a],(\x -> map toLists (gammaModelQ cats wagS piF x)), optGammaModel method cats piF wagS )
+                                                                                Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
+                                                                                Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
                                                let (t2',priors,nClasses) = case modelParams of 
                                                                                 Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
                                                                                 Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
@@ -267,7 +299,6 @@ main = do args <- getArgs
                                                                 then unzip (simS `using` parBuffer numThreads rdeepseq)
                                                                 else unzip simS
                                                outputProgressInit 100 (fromIntegral numSim)
-                                               let logY (x,y) = do logger $ "Simmodel params " ++ (show y)
                                                outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
                                                                                               when raw $ do writeRaw (name ++"-boot-raw.txt") $ (concat . concat) simStochDesc
