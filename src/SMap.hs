@@ -91,7 +91,7 @@ optSubR arg opt = do let model = case arg of
                                         
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
-                      Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
+                      Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ',' args) of 
                                         [a,b,c] -> return opt { optModel = Thmm a b c }
                                         _       -> error $ "Can't parse three doubles from " ++ args
 
@@ -147,7 +147,7 @@ defaultOptions = Options {
         optAln = Nothing,
         optTree = Nothing,
         optNumCats = 4,
-        optBootCount = 10,
+        optBootCount = 200,
         optSeed = Nothing,
         optLevel = FullOpt 1E-1,
         optModel = Thmm 0.1 1.0 1.0,
