@@ -28,18 +28,18 @@ Build-Type:     Simple
 --        Main-Is: testOpt.hs
 --        HS-Source-Dirs: src
 Executable smap
-        Extensions: ForeignFunctionInterface
+        Extensions: ForeignFunctionInterface, CPP
         C-sources: src/Phylo/nlopt_c.c
         Main-Is: SMap.hs
         HS-Source-Dirs: src
-        ghc-options:        -O2 -rtsopts -threaded -eventlog
+        ghc-options:        -O2 -rtsopts -threaded -eventlog -with-rtsopts=-A20m -with-rtsopts=-M500m
         extra-libraries: nlopt 
         if os(OSX)
                 frameworks: Accelerate
                 ghc-options: -fllvm
 library
         C-sources: src/Phylo/nlopt_c.c
-        Extensions: ForeignFunctionInterface
+        Extensions: ForeignFunctionInterface, CPP
         Exposed-Modules: Phylo.Opt, Phylo.Data, Phylo.Matrix, Phylo.Likelihood, Phylo.NLOpt, Phylo.PhyloXML, Phylo.NeXML, Phylo.Graphics.Plotting
         HS-Source-Dirs: src
         Includes: nlopt.h

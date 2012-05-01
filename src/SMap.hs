@@ -60,17 +60,18 @@ printHelp opt = do putStrLn $ usageInfo header options
                    putStrLn example
 --                   putStrLn reference
                    exitSuccess where
-                       header = unlines ["SMap: Graphical checking of covarion models using stochastic mapping"
+                       header = unlines ["SMap: Graphical checking of phylogenetic models using stochastic mapping"
                                         ,""]
                        example = unlines ["Examples:","Optimise and check a THMM model using 200 bootstrap replicates"
-                                         ,"Generated from model ef1.phy and tree ef1.tre"
+                                         ,"Using alignment ef1.phy and tree ef1.tre"
                                          ,""
                                          ,"smap -a ef1.phy -t ef1.tre --thmm --bootstrap 50 --opt-bootstrap --opt"
                                          ]
 --                       reference = unlines ["Graphical checking of covarion models using stochastic mapping"
 --                                           ,"Benjamin P. Blackburne, Simon Whelan, and Matthew Spencer"]
 optRawR opt = return opt {optRaw = True}
-optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr}
+optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr,
+                          optDebug = True}
 thmmModelR arg opt | trace "THMM found" True  = case arg of 
                       Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
                       Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ' ' args) of 
@@ -103,8 +104,8 @@ optAlgR arg opt = case arg of
                                               _ -> error $ "Can't parse optimisation method " ++ name
 
 data Options = Options  {
-        optAln  :: String,
-        optTree :: String,
+        optAln  :: Maybe String,
+        optTree :: Maybe String,
         optNumCats :: Int,
         optBootCount :: Int,
         optSeed :: Maybe Int,
@@ -112,7 +113,8 @@ data Options = Options  {
         optModel :: Model,
         optAlg :: OptAlg,
         optRaw :: Bool,
-        optLog :: Logger
+        optLog :: Logger,
+        optDebug :: Bool
 } deriving Show
 
 nullOut :: Logger
@@ -124,24 +126,25 @@ instance Show Logger where
         show x = ""
 defaultOptions :: Options
 defaultOptions = Options {
-        optAln = "in.fa",
-        optTree = "in.tre",
+        optAln = Nothing,
+        optTree = Nothing,
         optNumCats = 4,
         optBootCount = 10,
         optSeed = Nothing,
         optLevel = FullOpt 1E-1,
-        optModel = Thmm 1.0 0.1 1.0,
+        optModel = Thmm 0.1 1.0 1.0,
         optAlg = OptMethod var2,
         optRaw = False,
-        optLog = nullOut 
+        optLog = nullOut,
+        optDebug = False
 }
 
 -- alpha sigma pInv | alpha
 data Model = Thmm Double Double Double | Ras Double deriving Show
 data OptAlg = OptNone | OptMethod NLOptMethod deriving Show
 
-optAlnR arg opt = return opt { optAln = arg }
-optTreeR arg opt = return opt { optTree = arg }
+optAlnR arg opt = return opt { optAln = Just arg }
+optTreeR arg opt = return opt { optTree = Just arg }
 optNumCatsR arg opt = return opt {optNumCats = (read arg)}
 optBootCountR arg opt = return opt {optBootCount = (read arg)}
 optSeedR arg opt = return opt {optSeed = Just (read arg)}
@@ -174,7 +177,6 @@ getNiceOpt2 len (a,b,c) (a',b',c') = outL ++ outR where
 main = do args <- getArgs
           let ( actions, nonOpts, msgs ) = getOpt Permute options args
           opts <- foldl (>>=) (return defaultOptions) actions
-          print opts
           let Options {
                   optAln = aln,
                   optTree = tree,
@@ -185,17 +187,23 @@ main = do args <- getArgs
                   optModel = modelParams,
                   optAlg = optMethod,
                   optRaw = raw,
-                  optLog = log
+                  optLog = log,
+                  optDebug = debugging
           } = opts
           let (Logger logger) = log
-          print seed
-          print numSim
-          print cats 
+          logger $ show opts
+          logger $ show seed
+          logger $ show numSim
+          logger $ show cats 
           stdGen <- case seed of
                     Nothing -> getStdGen
                     Just x -> return $ mkStdGen x
-          aln' <- parseAlignmentFile parseUniversal aln                                                                                                       
-          tree' <- (liftM readBiNewickTree) (readFile tree)                                                                                                    
+          (aln',tree') <- case (aln,tree) of 
+                                (Just a,Just t) -> do a' <- parseAlignmentFile parseUniversal a
+                                                      t' <- (liftM readBiNewickTree) (readFile t)
+                                                      return (a',t')
+                                (_,_)           -> do printHelp opts
+                                                      exitSuccess
           output <- case (aln',tree',nonOpts) of 
                 (Nothing,_,_) -> do putStrLn "Failed to parse alignment"
                                     return Nothing
@@ -281,16 +289,17 @@ main = do args <- getArgs
                                                                                               forkIO $ renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
                                                                                               return m1
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               let prog mVar x = do takeMVar mVar
-                                                                    progressBar (msg "plotting") exact 100 0 x 
+                                               let prog mVar y x = do takeMVar mVar
+                                                                      putChar '\r'
+                                                                      putStr $ mkProgressBar (msg "plotting") exact 100 x y
                                                m1<-outputMat ("subs",simStochIntra,ansIntra)
                                                if (nClasses==1) 
                                                        then do putStr $ mkProgressBar (msg "plotting") exact 100 0 3
-                                                               mapM_ (prog m1) [1..3]
+                                                               mapM_ (prog m1 3) [1..3]
                                                        else do putStr $ mkProgressBar (msg "plotting") exact 100 0 6
                                                                m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
-                                                               mapM_ (prog m1) [1..3]
-                                                               mapM_ (prog m2) [4..6] 
+                                                               mapM_ (prog m1 6) [1..3]
+                                                               mapM_ (prog m2 6) [4..6] 
                                                putStrLn ""
                                                putStrLn " done"
                                                return Nothing
