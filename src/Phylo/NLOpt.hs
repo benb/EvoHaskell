@@ -80,6 +80,10 @@ nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (real
                                                   let retCode = fromIntegral $ met (realToFrac xtol) stepSize' startP (fromIntegral np) f'' lower' upper' 
                                                   ans <- seq retCode $ fmap (map realToFrac) $ peekArray np startP
                                                   freeHaskellFunPtr f''
+                                                  free startP
+                                                  free stepSize'
+                                                  free upper'
+                                                  free lower'
                                                   return (ans,retCode)
 
                                                                                                                                                               
