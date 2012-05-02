@@ -34,6 +34,7 @@ import Data.Time.Clock
 import Phylo.NLOpt
 import System.ProgressBar
 import Text.Printf
+import System.IO.Temp
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -294,16 +295,18 @@ main = do args <- getArgs
                                                                       --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
                                                let numThreads = Sync.numCapabilities-1
-                                               let (simStochInter,simStochIntra) = if (nClasses==1)
-                                                       then if (numThreads > 1)
+                                               let finishcalc tempdir = do 
+                                                     let (simStochInter,simStochIntra) = if (nClasses==1) then 
+                                                           if (numThreads > 1)
                                                                 then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
                                                                 else (undefined,map snd simS)
-                                                       else if (numThreads > 1) 
+                                                            else if (numThreads > 1) 
                                                                 then unzip (simS `using` parBuffer numThreads rdeepseq)
                                                                 else unzip simS
-                                               outputProgressInit 100 (fromIntegral numSim)
-                                               outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
-                                               let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
+                                                     outputProgressInit 100 (fromIntegral numSim)
+                                                     outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
+                                                     let outputMat (name,simStochDesc,ansDesc) = do
+                                                                                              let tot x = foldr (+) (0.0) x
                                                                                               putStrLn "1"
                                                                                               when raw $ do writeRaw (name ++"-boot-raw.txt") $ (concat . concat) simStochDesc
                                                                                                             writeRaw (name ++"-boot-edge.txt") $ concat (map (map tot) simStochDesc)
@@ -331,22 +334,23 @@ main = do args <- getArgs
                                                                                               renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
                                                                                               putStrLn "5"
                                                                                               return m1
-                                               let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               let prog mVar y x = do 
-                                                   putChar '\r'
-                                                   --takeMVar mVar
-                                                   putStr $ mkProgressBar (msg "plotting") exact 100 x y
-                                               m1<-outputMat ("subs",simStochIntra,ansIntra)
-                                               if (nClasses==1) 
+                                                     let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
+                                                     let prog mVar y x = do 
+                                                         putChar '\r'
+                                                         --takeMVar mVar
+                                                         putStr $ mkProgressBar (msg "plotting") exact 100 x y
+                                                     m1<-outputMat ("subs",simStochIntra,ansIntra)
+                                                     if (nClasses==1) 
                                                        then do putStr $ mkProgressBar (msg "plotting") exact 100 0 3
                                                                mapM_ (prog m1 3) [1..3]
                                                        else do putStr $ mkProgressBar (msg "plotting") exact 100 0 6
                                                                m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
                                                                mapM_ (prog m1 6) [1..3]
                                                                mapM_ (prog m2 6) [4..6] 
-                                               putStrLn ""
-                                               putStrLn " done"
-                                               return Nothing
+                                                     putStrLn ""
+                                                     putStrLn " done"
+                                                     return Nothing
+                                               withSystemTempDirectory "smap" finishcalc 
           case output of
                Just str -> putStrLn str
                Nothing -> return ()
