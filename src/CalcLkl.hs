@@ -251,7 +251,7 @@ splitsStr' i ((l,r):xs) = ((show i) ++ " " ++ (intercalate " " l) ++ " | " ++ (i
 getCols (PatternAlignment _ _ c _ _) = c
 
 normalise list = map ( / total) list where     
-                 total = foldr (+) 0.0 list
+                 total = foldl' (+) 0.0 list
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
 optParamsAndBL model tree params priors lower upper cutoff = optWithBS' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
@@ -271,7 +271,7 @@ stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[
 stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
-                                                fixProc pr x = (foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
+                                                fixProc pr x = (foldl' (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x))
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (map (\i-> (map (!!i) condE')) mapping, replicate (length mapping) priorE')
 
@@ -297,7 +297,7 @@ stochmapOut (condE',priorE') mapping priors f = do
                                                  fmtBranch' b (site:sites) (cond:cs) (prior:ps) = ((show b) ++ "\t" ++ (show site) ++ "\t" ++ (show cond) ++ "\t" ++ (show prior) ++ "\n") : (fmtBranch' b sites cs ps)
                                                  headerBranch = "Branch\tTotal_conditional_expectation\tTotal_prior_expectation\n"
                                                  remainderBranch = fmtBranch2 [0..] $ zip condE priorE
-                                                 total xs = foldr (+) 0.0 xs
+                                                 total xs = foldl' (+) 0.0 xs
                                                  fmtBranch2 bs [] = []
                                                  fmtBranch2 (b:bs) ((cond,prior):xs) = ((show b) ++"\t" ++ (show $ total cond) ++ "\t" ++ (show $ total prior) ++ "\n") : (fmtBranch2 bs xs)
                                                  headerSite = "Site\tTotal_conditional_expectation\tTotal_prior_expectation\n"

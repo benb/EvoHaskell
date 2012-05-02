@@ -26,6 +26,7 @@ import Data.Vector ((!))
 import Numeric.LinearAlgebra.LAPACK
 import Control.Parallel.Strategies
 import Control.DeepSeq
+import qualified Data.HashMap as HM
 
 #ifdef Debug
 mytrace = trace
@@ -70,6 +71,15 @@ posteriorTipsCSV :: Int -> PatternAlignment -> DNode -> String
 posteriorTipsCSV i aln j = intercalate "\n" $ (posteriorTipsCSVX aln) $ posteriorTips i aln j
 
 posteriorTipsCSVX aln = map (posteriorTipsCSVX' aln)
+
+cachedBranchModel initDist bm = let cached = (bm initDist) in
+                                \x -> case x of 
+                                           x | x == initDist -> cached
+                                             | otherwise -> bm x
+
+cachedBranchModelTree (DTree l m r pLs pC priors pis) = DTree (cachedBranchModelTree l) (cachedBranchModelTree m) (cachedBranchModelTree r) pLs pC priors pis
+cachedBranchModelTree (DINode l r bl model pl) = DINode (cachedBranchModelTree l) (cachedBranchModelTree r) bl (map (cachedBranchModel bl) model) pl
+cachedBranchModelTree (DLeaf name dist seq partial model pl) = DLeaf name dist seq partial (map (cachedBranchModel dist) model) pl
 
 posteriorTipsCSVX' :: PatternAlignment ->  [(Int,String,DNode,[Double])] -> String
 posteriorTipsCSVX' (PatternAlignment names seqs _ _ _)  list = intercalate "\n" $ map (\(x,x',y,z) -> name ++ "," ++  (show x) ++ "," ++ (show x') ++"," ++ [z]  ++"," ++ (intercalate "," (map show y))) $ zip4 [0..] realseqpos (transpose post) alignedseq where
@@ -240,11 +250,11 @@ structDataN' hiddenClasses seqDataType (PatternAlignment names seqs columns patt
                                                                                                                           ans = NLeaf name [dist] sequence partial 
 
 
-structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = left `par` right `par` NINode left right [dist] where
+structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right [dist] where
                                                                               left = structDataN' hiddenClasses seqDataType pA transPat c1
                                                                               right = structDataN' hiddenClasses seqDataType pA transPat c2
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = left `par` middle `par` right `par` NTree left middle right $ counts pA where
+structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = NTree left middle right $ counts pA where
                                                                                   left = structDataN' hiddenClasses seqDataType pA transPat l
                                                                                   right = structDataN' hiddenClasses seqDataType pA transPat r
                                                                                   middle = structDataN' hiddenClasses seqDataType pA transPat $ addDist dist c2
@@ -264,12 +274,12 @@ addModelNNode :: NNode -> [BranchModel] -> [Double] -> [Vector Double] -> DNode
 addModelNNode (NLeaf name dist sequence partial) model _ _  = DLeaf name dist sequence partial model partial' where
                                                                                               partial' = calcLeafPL partial dist model
 
-addModelNNode (NINode c1 c2 dist) model priors pi =  left `par` right `par` DINode left right dist model myPL where
+addModelNNode (NINode c1 c2 dist) model priors pi =  DINode left right dist model myPL where
                                                   left = addModelNNode c1 model priors pi
                                                   right = addModelNNode c2 model priors pi
                                                   myPL = calcPL left right dist model 
                                                                             
-addModelNNode (NTree c1 c2 c3 pat) model priors pi = left `par` right `par` middle `par` DTree left middle right myPL pat priors pi where
+addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myPL pat priors pi where
                                   left = addModelNNode c1 model priors pi
                                   middle = addModelNNode c2 model priors pi
                                   right= addModelNNode c3 model priors pi
@@ -979,13 +989,67 @@ genList stdGen = first:remainder where
         (first,next) = split stdGen
         remainder = genList next
 
+draw :: Matrix Double -> Int -> Double -> Int
+draw mat row prob  =  draw' 0 mat row prob
+draw' :: Int -> Matrix Double -> Int -> Double -> Int
+draw' i mat row prob = case (prob - (mat @@> (row,i))) of 
+                          x | x <= 0.0 -> i
+                            | otherwise -> draw' (i+1) mat row x
+
+drawVec vec prob = drawVec' 0 vec prob
+drawVec' i vec prob = case (prob - vec @> i) of
+                          x | x <= 0.0 -> i
+                            | otherwise -> drawVec' (i+1) vec x
+
+makeSimulatedAlignment' stdGen t 0 = []
+makeSimulatedAlignment' stdGen t i = (column,stdGen') : (makeSimulatedAlignment' stdGen' t (i-1)) where
+        (column,stdGen') = makeSimulatedColumnX t stdGen
+
+makeSimulatedAlignment stdGen t i = quickListAlignment names seqs where
+        raw = makeSimulatedAlignment' stdGen t i
+        columns = map fst raw
+        names = map snd $ head columns
+        seqs = transpose $ map (map fst) columns
+
+
+makeSimulatedColumn :: DNode -> StdGen -> Int -> Int -> ([(Char,String)],StdGen)
+makeSimulatedColumn (DLeaf name dist _ _ modelList _) gen myRow modelIndex = ans where
+        ans = ([(myBase,name)],gen')
+        (rand,gen') = randomR (0.0,1.0) gen 
+        pT = (fst $ (modelList !! modelIndex) dist)
+        myBase =  aaOrderVec ! ((draw pT myRow rand) `mod` 20)
+
+makeSimulatedColumn (DINode l r dist modelList _) gen myRow modelIndex = ans where
+        ans = (myBase,genR)
+        (rand,gen') = randomR (0.0,1.0) gen
+        pT = (fst $ (modelList !! modelIndex) dist)
+        myRow' = draw pT myRow rand
+        (mybasesl,genL) = makeSimulatedColumn l gen' myRow' modelIndex
+        (mybasesr,genR) = makeSimulatedColumn r genL myRow' modelIndex
+        myBase = mybasesl ++ mybasesr
+
+
+makeSimulatedColumn (DTree l m r _ _ priors pis) gen myRow modelIndex = ans where
+        ans = (myBase,genR)
+        (mybasesl,genL) = makeSimulatedColumn l gen myRow modelIndex
+        (mybasesm,genM) = makeSimulatedColumn m genL myRow modelIndex
+        (mybasesr,genR) = makeSimulatedColumn r genM myRow modelIndex
+        myBase = mybasesl ++ mybasesm ++ mybasesr
+        
+
+makeSimulatedColumnX tree@(DTree l m r _ _ priors pis) gen = makeSimulatedColumn tree gen'' myRow modelIndex where
+        (rand,gen') = randomR (0.0,1.0) gen
+        (rand2,gen'') = randomR (0.0,1.0) gen'
+        myRow = drawVec (pis !! modelIndex) rand
+        modelIndex = drawFromDist priors rand2 
+
 makeSimulatedTree = makeSimulatedTreeX True
 
 makeSimulatedTreeX withGaps seqDataType hiddenClasses stdGen len (DTree l m r _ pC priors pis) = DTree left middle right pLs (replicate len 1) priors pis where
         left = makeSimulatedTree' pC withGaps seqDataType hiddenClasses leftR topSeq models l
         middle = makeSimulatedTree' pC withGaps seqDataType hiddenClasses middleR topSeq models m
         right  = makeSimulatedTree' pC withGaps seqDataType hiddenClasses rightR topSeq models r
-        pLs = calcRootPL l m r
+        pLs = calcRootPL left middle right
         (r0:r1:leftR:middleR:rightR:remainder) = genList stdGen
         models = take len $ map (drawFromDist priors) $ randomRs (0.0,1.0) r0
         drawLetters :: [Int]

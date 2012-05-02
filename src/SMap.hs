@@ -246,7 +246,7 @@ main = do args <- getArgs
                 (Just a,Right t,paramT)->   do logger "Debugging enabled"
                                                let method = case optMethod of 
                                                         (OptMethod a) -> a
-                                                        _             -> bobyqa
+                                                        _             -> var2
                                                let pAln = pAlignment a
                                                hSetBuffering stdout NoBuffering
                                                (sMat,pi) <- getSub subModel a 
@@ -261,7 +261,7 @@ main = do args <- getArgs
                                                                 (FullOpt level) -> min level 1E-2
                                                                 _               -> 1E-2
                                                (t2,params) <- case optMethod of 
-                                                                                       OptNone                        -> return $ (t2',initparams)
+                                                                                       OptNone                        -> return $ (cachedBranchModelTree t2',initparams)
                                                                                        (OptMethod _)                  -> do putStrLn "optimising model"
                                                                                                                             let ans = optF tol t2' initparams
                                                                                                                             let start = head ans
@@ -270,7 +270,7 @@ main = do args <- getArgs
                                                                                                                                            printNiceOpt 100 x) (zip ans (tail ans))
                                                                                                                             let (a,b,_) = last ans
                                                                                                                             putStrLn ""
-                                                                                                                            return (a,b)
+                                                                                                                            return (cachedBranchModelTree a,b)
 
                                                logger $ "Main model params " ++ (show params)
                                                let aX = map (fst . leftSplit) $ getAllF t2
@@ -290,41 +290,52 @@ main = do args <- getArgs
                                                                       (BranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (NoOpt,_) -> simulate s 
-                                                                      where simulate x = map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
+                                                                      where simulate x = map (\x-> newSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
+                                                                      --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
-                                               let numThreads = Sync.numCapabilities
+                                               let numThreads = Sync.numCapabilities-1
                                                let (simStochInter,simStochIntra) = if (nClasses==1)
                                                        then if (numThreads > 1)
                                                                 then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
                                                                 else (undefined,map snd simS)
-                                                       else if (numThreads >1) 
+                                                       else if (numThreads > 1) 
                                                                 then unzip (simS `using` parBuffer numThreads rdeepseq)
                                                                 else unzip simS
                                                outputProgressInit 100 (fromIntegral numSim)
                                                outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
                                                let outputMat (name,simStochDesc,ansDesc) = do let tot x = foldr (+) (0.0) x
+                                                                                              putStrLn "1"
                                                                                               when raw $ do writeRaw (name ++"-boot-raw.txt") $ (concat . concat) simStochDesc
                                                                                                             writeRaw (name ++"-boot-edge.txt") $ concat (map (map tot) simStochDesc)
                                                                                                             writeRaw (name ++"-boot-site.txt") $ concat (map (map tot) $ map transpose simStochDesc)
                                                                                                             writeRaw (name ++"-real-raw.txt") $ concat ansDesc
                                                                                                             writeRaw (name ++"-real-edge.txt") $ map tot ansDesc
                                                                                                             writeRaw (name ++"-real-site.txt") $ map tot $ transpose ansDesc
+                                                                                              putStrLn "2"
                                                                                               let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
                                                                                               let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
                                                                                               let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
                                                                                               let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
                                                                                               let tempTree = annotateTreeWith edgeQuantileMap t2
+                                                                                              print edgeQuantileMap
+                                                                                              putStrLn "2x"
                                                                                               writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
+                                                                                              putStrLn "2a"
                                                                                               writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
+                                                                                              putStrLn "2b"
                                                                                               m1 <- newEmptyMVar
-                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
-                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
-                                                                                              forkIO $ renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                                                                              renderableToPDFFileM m1 (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
+                                                                                              putStrLn "3"
+                                                                                              renderableToPDFFileM m1 (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
+                                                                                              putStrLn "4"
+                                                                                              renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
+                                                                                              putStrLn "5"
                                                                                               return m1
                                                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                               let prog mVar y x = do takeMVar mVar
-                                                                      putChar '\r'
-                                                                      putStr $ mkProgressBar (msg "plotting") exact 100 x y
+                                               let prog mVar y x = do 
+                                                   putChar '\r'
+                                                   --takeMVar mVar
+                                                   putStr $ mkProgressBar (msg "plotting") exact 100 x y
                                                m1<-outputMat ("subs",simStochIntra,ansIntra)
                                                if (nClasses==1) 
                                                        then do putStr $ mkProgressBar (msg "plotting") exact 100 0 3
@@ -344,7 +355,7 @@ main = do args <- getArgs
 --outputProgress :: Int -> [a] -> IO ()
 outputProgressInit width numSim = putStr $ mkProgressBar (msg "bootstrapping")  exact width 0 numSim
 outputProgress f width numSim i [] = putStrLn "" --progressBar (msg "bootstrapping") exact width i numSim
-outputProgress f width numSim i (x:xs) = do let m = x `seq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
+outputProgress f width numSim i (x:xs) = do let m = x `deepseq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
                                             f x 
                                             putChar '\r'
                                             putStr m
@@ -353,7 +364,7 @@ outputProgress f width numSim i (x:xs) = do let m = x `seq` (mkProgressBar (msg 
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
 
 renderableToPDFFileM mvar a b c d = do renderableToPDFFile a b c d
-                                       putMVar mvar ()
+                                       --putMVar mvar ()
 
 dualStochMap stochmapTT a b x = (stochmapTT a x, stochmapTT b x)
 length2 = map length
@@ -430,7 +441,7 @@ stochmapOrder :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[Double]],[
 stochmapOrder (condE,priorE) mapping priors = order where
                                                 condE' = map (fixProc2 priors) condE
                                                 priorE' = map (fixProc priors) priorE
-                                                fixProc pr x = foldr (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x)
+                                                fixProc pr x = foldl' (+) (0.0) (map (\(x,y) -> x*y) $ zip pr x)
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
 
@@ -458,7 +469,7 @@ stochmapOut (condE',priorE') mapping priors f = do
                                                  fmtBranch' b (site:sites) (cond:cs) (prior:ps) = ((show b) ++ "\t" ++ (show site) ++ "\t" ++ (show cond) ++ "\t" ++ (show prior) ++ "\n") : (fmtBranch' b sites cs ps)
                                                  headerBranch = "Branch\tTotal_conditional_expectation\tTotal_prior_expectation\n"
                                                  remainderBranch = fmtBranch2 [0..] $ zip condE priorE
-                                                 total xs = foldr (+) 0.0 xs
+                                                 total xs = foldl' (+) 0.0 xs
                                                  fmtBranch2 bs [] = []
                                                  fmtBranch2 (b:bs) ((cond,prior):xs) = ((show b) ++"\t" ++ (show $ total cond) ++ "\t" ++ (show $ total prior) ++ "\n") : (fmtBranch2 bs xs)
                                                  headerSite = "Site\tTotal_conditional_expectation\tTotal_prior_expectation\n"
@@ -526,6 +537,10 @@ patternSimulation origTree modelTree model priors stdGen dataType classes len = 
                              pAln = pAlignment $ lAln
                              lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
+newSimulation origTree tree model priors stdGen dataType classes len = addModelFx (structDataN classes dataType (pAln) origTree) model priors where
+        aln = makeSimulatedAlignment stdGen tree len
+        pAln = pAlignment aln
+
 --patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
 --                             ans = makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
@@ -534,7 +549,7 @@ getAlnData (PatternAlignment names seqs columns patterns counts) = (length count
 
 cramerVonMises empQ theQs = pvalue where
         v = fromIntegral $ length empQ
-        cram x = foldr (+) 0.0 $ map (\(w,i)->  (square $ w - (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
+        cram x = foldl' (+) 0.0 $ map (\(w,i)->  (square $ w - (fromIntegral ((2*i)-1)/(2*v))) + (1.0/(12*v))) $ zip x (map fromIntegral [1..])
         wv2_emp = cram empQ
         wv2_thes = map cram theQs
         square x = x*x

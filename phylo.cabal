@@ -32,7 +32,9 @@ Executable smap
         C-sources: src/Phylo/nlopt_c.c
         Main-Is: SMap.hs
         HS-Source-Dirs: src
-        ghc-options:        -O2 -rtsopts -threaded -with-rtsopts=-A20m -with-rtsopts=-M2000m
+        ghc-options:        -O2 -rtsopts -prof  -fprof-auto -threaded
+        ---fprof-cafs
+        -- -threaded -with-rtsopts=-A20m -with-rtsopts=-M2000m
         extra-libraries: nlopt 
         if os(OSX)
                 frameworks: Accelerate
