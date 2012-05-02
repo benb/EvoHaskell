@@ -64,7 +64,7 @@ newuoa = unsafeNlopt newuoa_
 
 --traceX a x = trace (show a ++ (show x)) x
 --traceXm a = liftM (traceX a)
-unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ runInBoundThread $ nlopt met stepSize xtol params f lower upper 
+unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ nlopt met stepSize xtol params f lower upper 
 
 nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 

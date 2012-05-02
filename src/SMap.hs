@@ -89,15 +89,15 @@ optSubR arg opt = do let model = case arg of
 
                                         
                                         
-thmmModelR arg opt | trace "THMM found" True  = case arg of 
-                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Thmm 0.1 1.0 1.0 }
-                      Just args | trace ("THMM " ++ args) True -> case (map read $ splitBy ',' args) of 
+thmmModelR arg opt = case arg of 
+                      Nothing  -> return opt {optModel = Thmm 0.1 1.0 1.0 }
+                      Just args -> case (map read $ splitBy ',' args) of 
                                         [a,b,c] -> return opt { optModel = Thmm a b c }
                                         _       -> error $ "Can't parse three doubles from " ++ args
 
-gammaModelR arg opt | trace "THMM found" True  = case arg of 
-                      Nothing | trace "THMM NOTHING" True -> return opt {optModel = Ras 1.0 }
-                      Just args | trace ("THMM " ++ args) True -> case (read args) of 
+gammaModelR arg opt = case arg of 
+                      Nothing -> return opt {optModel = Ras 1.0 }
+                      Just args -> case (read args) of 
                                         a -> return opt { optModel = Ras a }
 
 
@@ -168,7 +168,9 @@ optNumCatsR arg opt = return opt {optNumCats = (read arg)}
 optBootCountR arg opt = return opt {optBootCount = (read arg)}
 optSeedR arg opt = return opt {optSeed = Just (read arg)}
 optFR arg opt = optFR' (map toLower arg) opt
-optFR' arg opt | (take 4 arg)=="full" = return opt {optLevel = FullOpt (read $ drop 4 arg)}
+optFR' arg opt | (take 4 arg)=="full" = case (drop 4 arg) of 
+                                                "" -> return opt {optLevel = FullOpt 1E-1}
+                                                x  -> return opt {optLevel = FullOpt (read x)}
                | arg=="branch" = return opt {optLevel = BranchOpt}
                | arg=="quick" = return opt {optLevel = QuickBranchOpt}
                | arg=="none" = return opt {optLevel = NoOpt}
@@ -467,15 +469,15 @@ qList qFunc numQ = map (\x-> qFunc x numQ) [0..numQ]
 
 
 
-uniformQ :: [([[Double]],[Double])] -> (Int -> Int -> Double)
-uniformQ simData = partialFunc where 
-                      partialFunc q k | trace ("Made vec " ++ (show vec)) True = continuousBy medianUnbiased q k vec
-                      vec | trace ("Making vector " ++ (take 10 $ show simData)) True = (UVec.fromList $ concatMap allDisc simData)
+--uniformQ :: [([[Double]],[Double])] -> (Int -> Int -> Double)
+--uniformQ simData = partialFunc where 
+--                      partialFunc q k | trace ("Made vec " ++ (show vec)) True = continuousBy medianUnbiased q k vec
+--                      vec | trace ("Making vector " ++ (take 10 $ show simData)) True = (UVec.fromList $ concatMap allDisc simData)
 
 linearFromRaw mapping priors ans | trace "linearFromRaw" True = linearAns $ stochmapOrder ans mapping priors
 linearAns reformattedAns = allDisc reformattedAns
 reformatAns mapping priors stochResult = (map $ uncurry3 stochmapOrder) $ zip3 stochResult mapping priors
-uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors stochResult
+--uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors stochResult
 
 uncurry3 f (a,b,c) = f a b c 
 
