@@ -37,6 +37,7 @@ import Text.Printf
 import System.IO.Temp
 import System.FilePath (pathSeparator)
 import Data.Binary
+import Data.Maybe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as UVec
 
@@ -59,6 +60,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['D'] ["debug"] (NoArg optLogR) "debugging output"
           , Option ['h'] ["help"] (NoArg printHelp) "print help"
           , Option ['m'] ["model"] (ReqArg optSubR "SUBMODEL") "model (wag or wag,F (default) or jtt or jtt,F or <customFile> or <customFile>,F)"
+          , Option [] ["simulate"] (ReqArg optSimulateR "LENGTH") "simulate a sequence alignment from given model"
             ]
 
 
@@ -75,10 +77,11 @@ printHelp opt = do putStrLn $ usageInfo header options
                                          ]
 --                       reference = unlines ["Graphical checking of covarion models using stochastic mapping"
 --                                           ,"Benjamin P. Blackburne, Simon Whelan, and Matthew Spencer"]
+optSimulateR arg opt = return opt {optSimulateOnly = Just (read arg)}
+
 optRawR opt = return opt {optRaw = True}
 optLogR opt = return opt {optLog = Logger $ hPutStrLn stderr,
                           optDebug = True}
-
 optSubR arg opt = do let model = case arg of 
                                         "jtt" -> JTT
                                         "jtt,F" -> JTTF
@@ -136,7 +139,8 @@ data Options = Options  {
         optRaw :: Bool,
         optLog :: Logger,
         optDebug :: Bool,
-        optSub :: SubModel
+        optSub :: SubModel,
+        optSimulateOnly :: Maybe Int
 } deriving Show
 
 nullOut :: Logger
@@ -159,7 +163,8 @@ defaultOptions = Options {
         optRaw = False,
         optLog = nullOut,
         optDebug = False,
-        optSub = WAGF
+        optSub = WAGF,
+        optSimulateOnly = Nothing
 }
 
 -- alpha sigma pInv | alpha
@@ -226,7 +231,8 @@ main = do args <- getArgs
                   optRaw = raw,
                   optLog = log,
                   optDebug = debugging,
-                  optSub = subModel
+                  optSub = subModel,
+                  optSimulateOnly = simulateOnly
           } = opts
           let (Logger logger) = log
           logger $ show opts
@@ -236,130 +242,133 @@ main = do args <- getArgs
           stdGen <- case seed of
                     Nothing -> getStdGen
                     Just x -> return $ mkStdGen x
-          (aln',tree') <- case (aln,tree) of 
-                                (Just a,Just t) -> do a' <- parseAlignmentFile parseUniversal a
-                                                      t' <- (liftM readBiNewickTree) (readFile t)
-                                                      return (a',t')
-                                (_,_)           -> do printHelp opts
-                                                      exitSuccess
-          output <- case (aln',tree',nonOpts) of 
-                (Nothing,_,_) -> do putStrLn "Failed to parse alignment"
-                                    return Nothing
-                (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
-                                     return Nothing
-                (Just a,Right t,paramT)->   do logger "Debugging enabled"
-                                               let debugtrace = case debugging of 
-                                                                          True  -> trace 
-                                                                          False -> flip const
-                                               let method = case optMethod of 
-                                                        (OptMethod a) -> a
-                                                        _             -> var2
-                                               let pAln = pAlignment a
-                                               hSetBuffering stdout NoBuffering
-                                               (sMat,pi) <- getSub subModel a 
-                                               let (modelF,initparams,qsetF,optF) = case modelParams of 
-                                                                                Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
-                                                                                Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
-                                               let (t2',priors,nClasses) = case modelParams of 
-                                                                                Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
-                                                                                Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
-                                               let nState = nClasses * 20
-                                               let tol = case optBoot of
-                                                                (FullOpt level) -> min level 1E-2
-                                                                _               -> 1E-2
-                                               (t2,params) <- case optMethod of 
-                                                               OptNone         -> return $ (cachedBranchModelTree t2',initparams)
-                                                               (OptMethod _)   -> do putStrLn "optimising model"
-                                                                                     let ans = optF tol t2' initparams
-                                                                                     let start = head ans
-                                                                                     putStr $ getNiceOpt 100 $ head ans
-                                                                                     mapM (\x -> do putChar '\r'
-                                                                                                    printNiceOpt 100 x) (zip ans (tail ans))
-                                                                                     let (a,b,_) = last ans
-                                                                                     putStrLn ""
-                                                                                     return (cachedBranchModelTree a,b)
-                                               logger $ "Main model params " ++ (show params)
-                                               let aX = map (fst . leftSplit) $ getAllF t2
-                                               let bX = getLeftSplit t2
-                                               --print $ "OK? " ++ (show (aX==bX))
-                                               if (aX/=bX)
-                                                       then error "Bug in smap, please report"
-                                                       else return $ ()
-                                               let nProc = length priors
-                                               let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT nProc nState (getAln tree) lM tree) (treeToMap tree) (getPriors tree)
-                                               let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT nProc nState a lM tree) (treeToMap tree) (getPriors tree)
-                                               let numQuantile = 500
-                                               let stdGens = take numSim $ genList stdGen
-                                               let alnLength = length $ Phylo.Likelihood.columns pAln
-                                               let simulations s = case (optBoot,optMethod) of 
-                                                                      (FullOpt level,_) -> map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ simulate s
-                                                                      (BranchOpt,_) -> map optBLDFull0 $ simulate s
-                                                                      (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
-                                                                      (NoOpt,_) -> simulate s 
-                                                                      where simulate x = map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
-                                                                      --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
-                                               let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
-                                               let numThreads = Sync.numCapabilities-1
-                                               let finishcalc tempdir = do 
-                                                     putStrLn tempdir
-                                                     outputProgressInit 100 (fromIntegral numSim)
-                                                     let simS' = simS `using` parBuffer numThreads rdeepseq
-                                                     let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
-                                                                               BS.writeFile name (encode x)
-                                                                               outputProgress 100 (fromIntegral numSim) i 
-                                                                               return name
-                                                     simFiles <- mapM (\(i,d) -> writeOut i "stoch" d) $ zip [1..] simS'
-                                                     putStrLn "" --finish output bar
-                                                     let readIn name = do mydata <- BS.readFile name
-                                                                          let ans = (decode mydata) :: ([[Double]],[[Double]])
-                                                                          return ans
-                                                     let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
-                                                                      let tot x = foldr (+) (0.0) x
-                                                                      let readIn' name = do ans <- readIn name
-                                                                                            return $ fx ans
-                                                                      let qqFunc f2 proc x = do
-                                                                                           let boots = map f2 x
-                                                                                           let real = f2 ansDesc
-                                                                                           when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
-                                                                                                         writeRaw (name ++"-real-" ++ proc ++".txt") $ real
-                                                                                           return $ makeQQLine numQuantile boots real
-                                                                      (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
-                                                                      renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
-                                                                      putMVar m1 ()
-                                                                      (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
-                                                                      renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
-                                                                      putMVar m1 ()
-                                                                      (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
-                                                                      renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
-                                                                      putMVar m1 ()
-                                                                      let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
-                                                                      eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
-                                                                      let tempTree = annotateTreeWith eQM t2
-                                                                      writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
-                                                                      putMVar m1 ()
-                                                                      writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
-                                                                      putMVar m1 ()
-                             --intra
-                                                     let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
-                                                     m1<-newEmptyMVar
-                                                     forkIO $ outputMat ("subs",snd,m1,simFiles,ansIntra)
-                                                     let prog mVar y x = do 
-                                                         putChar '\r'
-                                                         takeMVar mVar
-                                                         putStr $ mkProgressBar (msg "plotting") exact 100 x y
-                                                     if nClasses==1
-                                                        then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
-                                                                mapM_ (prog m1 5) [1..5]
-                                                        else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
-                                                                forkIO $ outputMat ("switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
-                                                                mapM_ (prog m1 10) [1..10]
-                                                     putStrLn ""
-                                                     putStrLn " done"
-                                                     return Nothing
-                                               withSystemTempDirectory "smap" finishcalc 
-          case output of
-               Just str -> putStrLn str
-               Nothing -> return ()
+          tree' <- case tree of 
+                       Just t          -> do t' <- (liftM readBiNewickTree) (readFile t)
+                                             case t' of 
+                                                Left err -> do putStrLn $ "Failed to parse tree " ++ err
+                                                               exitFailure
+                                                Right tx -> return tx
+                       Nothing         -> do printHelp opts
+                                             exitSuccess
+          aln' <- case aln of 
+                       Nothing -> return $ Nothing
+                       Just a  -> do ans <- parseAlignmentFile parseUniversal a 
+                                     case ans of
+                                       Nothing -> do putStrLn "Failed to parse alignment"
+                                                     exitFailure
+                                       x       -> return x
+          let t = tree'
+          let a = fromJust aln'
+          logger "Debugging enabled"
+          let debugtrace = case debugging of 
+                                     True  -> trace 
+                                     False -> flip const
+          let method = case optMethod of 
+                   (OptMethod a) -> a
+                   _             -> var2
+          let pAln = pAlignment a
+          hSetBuffering stdout NoBuffering
+          (sMat,pi) <- getSub subModel a 
+          let (modelF,initparams,qsetF,optF) = case modelParams of 
+                                           Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
+                                           Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
+          let (t2',priors,nClasses) = case modelParams of 
+                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
+                                           Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
+          let nState = nClasses * 20
+          let tol = case optBoot of
+                           (FullOpt level) -> min level 1E-2
+                           _               -> 1E-2
+          (t2,params) <- case optMethod of 
+                          OptNone         -> return $ (cachedBranchModelTree t2',initparams)
+                          (OptMethod _)   -> do putStrLn "optimising model"
+                                                let ans = optF tol t2' initparams
+                                                let start = head ans
+                                                putStr $ getNiceOpt 100 $ head ans
+                                                mapM (\x -> do putChar '\r'
+                                                               printNiceOpt 100 x) (zip ans (tail ans))
+                                                let (a,b,_) = last ans
+                                                putStrLn ""
+                                                return (cachedBranchModelTree a,b)
+          logger $ "Main model params " ++ (show params)
+          let aX = map (fst . leftSplit) $ getAllF t2
+          let bX = getLeftSplit t2
+          --print $ "OK? " ++ (show (aX==bX))
+          if (aX/=bX)
+                  then error "Bug in smap, please report"
+                  else return $ ()
+          let nProc = length priors
+          let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT nProc nState (getAln tree) lM tree) (treeToMap tree) (getPriors tree)
+          let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT nProc nState a lM tree) (treeToMap tree) (getPriors tree)
+          let numQuantile = 500
+          let stdGens = take numSim $ genList stdGen
+          let alnLength = length $ Phylo.Likelihood.columns pAln
+          let simulations s = case (optBoot,optMethod) of 
+                                 (FullOpt level,_) -> map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ simulate s
+                                 (BranchOpt,_) -> map optBLDFull0 $ simulate s
+                                 (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
+                                 (NoOpt,_) -> simulate s 
+                                 where simulate x = map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
+                                 --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
+          let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
+          let numThreads = Sync.numCapabilities-1
+          let finishcalc tempdir = do 
+                putStrLn tempdir
+                outputProgressInit 100 (fromIntegral numSim)
+                let simS' = simS `using` parBuffer numThreads rdeepseq
+                let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
+                                          BS.writeFile name (encode x)
+                                          outputProgress 100 (fromIntegral numSim) i 
+                                          return name
+                simFiles <- mapM (\(i,d) -> writeOut i "stoch" d) $ zip [1..] simS'
+                putStrLn "" --finish output bar
+                let readIn name = do mydata <- BS.readFile name
+                                     let ans = (decode mydata) :: ([[Double]],[[Double]])
+                                     return ans
+                let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
+                                 let tot x = foldr (+) (0.0) x
+                                 let readIn' name = do ans <- readIn name
+                                                       return $ fx ans
+                                 let qqFunc f2 proc x = do
+                                                      let boots = map f2 x
+                                                      let real = f2 ansDesc
+                                                      when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
+                                                                    writeRaw (name ++"-real-" ++ proc ++".txt") $ real
+                                                      return $ makeQQLine numQuantile boots real
+                                 (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
+                                 renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
+                                 putMVar m1 ()
+                                 (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
+                                 renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
+                                 putMVar m1 ()
+                                 (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
+                                 renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
+                                 putMVar m1 ()
+                                 let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
+                                 eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
+                                 let tempTree = annotateTreeWith eQM t2
+                                 writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
+                                 putMVar m1 ()
+                                 writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
+                                 putMVar m1 ()
+          
+                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
+                m1<-newEmptyMVar
+                forkIO $ outputMat ("subs",snd,m1,simFiles,ansIntra)
+                let prog mVar y x = do 
+                    putChar '\r'
+                    takeMVar mVar
+                    putStr $ mkProgressBar (msg "plotting") exact 100 x y
+                if nClasses==1
+                   then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
+                           mapM_ (prog m1 5) [1..5]
+                   else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
+                           forkIO $ outputMat ("switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
+                           mapM_ (prog m1 10) [1..10]
+                putStrLn ""
+                putStrLn " done"
+                return Nothing
+          withSystemTempDirectory "smap" finishcalc 
 
 
 --outputProgress :: Int -> [a] -> IO ()
