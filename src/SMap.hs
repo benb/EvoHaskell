@@ -248,6 +248,9 @@ main = do args <- getArgs
                 (_,Left err,_) -> do putStrLn $ "Failed to parse tree " ++ err
                                      return Nothing
                 (Just a,Right t,paramT)->   do logger "Debugging enabled"
+                                               let debugtrace = case debugging of 
+                                                                          True  -> trace 
+                                                                          False -> flip const
                                                let method = case optMethod of 
                                                         (OptMethod a) -> a
                                                         _             -> var2
@@ -289,7 +292,7 @@ main = do args <- getArgs
                                                let stdGens = take numSim $ genList stdGen
                                                let alnLength = length $ Phylo.Likelihood.columns pAln
                                                let simulations s = case (optBoot,optMethod) of 
-                                                                      (FullOpt level,_) -> map (\(a,b,c) -> a) $ map (\x->last $ optF level x params) $ simulate s
+                                                                      (FullOpt level,_) -> map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ simulate s
                                                                       (BranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (NoOpt,_) -> simulate s 

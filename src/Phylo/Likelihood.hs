@@ -1014,6 +1014,7 @@ overlayGaps from@(ListAlignment names seqs _) to@(ListAlignment names' seqs' _) 
         overlayGaps'' ((x:xs),(y:ys))=case x of 
                                            x | isGapChar x -> x:(overlayGaps'' (xs,ys))
                                              | otherwise -> y:(overlayGaps'' (xs,ys))
+        overlayGaps'' _ = []
 
 makeSimulatedAlignmentWithGaps stdGen t oldAln@(ListAlignment n s c) = overlayGaps oldAln (makeSimulatedAlignment stdGen t (length $ c))
 
