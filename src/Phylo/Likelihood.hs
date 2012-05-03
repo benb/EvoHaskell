@@ -26,6 +26,7 @@ import Data.Vector ((!))
 import Numeric.LinearAlgebra.LAPACK
 import Control.Parallel.Strategies
 import Control.DeepSeq
+import Data.Ord
 import qualified Data.HashMap as HM
 
 #ifdef Debug
@@ -1004,6 +1005,17 @@ drawVec' i vec prob = case (prob - vec @> i) of
 makeSimulatedAlignment' stdGen t 0 = []
 makeSimulatedAlignment' stdGen t i = (column,stdGen') : (makeSimulatedAlignment' stdGen' t (i-1)) where
         (column,stdGen') = makeSimulatedColumnX t stdGen
+
+overlayGaps from@(ListAlignment names seqs _) to@(ListAlignment names' seqs' _) = quickListAlignment sortedNames' sortedSeqs'' where
+        sortedSeqs = snd $ unzip $ sortBy (comparing snd) $ zip names seqs
+        (sortedNames',sortedSeqs') = unzip $ sortBy (comparing snd) $ zip names' seqs'
+        sortedSeqs'' = overlayGaps' sortedSeqs sortedSeqs'
+        overlayGaps' x y = map overlayGaps'' $ zip x y
+        overlayGaps'' ((x:xs),(y:ys))=case x of 
+                                           x | isGapChar x -> x:(overlayGaps'' (xs,ys))
+                                             | otherwise -> y:(overlayGaps'' (xs,ys))
+
+makeSimulatedAlignmentWithGaps stdGen t oldAln@(ListAlignment n s c) = overlayGaps oldAln (makeSimulatedAlignment stdGen t (length $ c))
 
 makeSimulatedAlignment stdGen t i = quickListAlignment names seqs where
         raw = makeSimulatedAlignment' stdGen t i

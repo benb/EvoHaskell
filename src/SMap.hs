@@ -294,7 +294,7 @@ main = do args <- getArgs
                                                                       (BranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
                                                                       (NoOpt,_) -> simulate s 
-                                                                      where simulate x = map (\x-> newSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
+                                                                      where simulate x = map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
                                                                       --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
                                                let numThreads = Sync.numCapabilities-1
@@ -540,8 +540,8 @@ patternSimulation origTree modelTree model priors stdGen dataType classes len = 
                              pAln = pAlignment $ lAln
                              lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
-newSimulation origTree tree model priors stdGen dataType classes len = addModelFx (structDataN classes dataType (pAln) origTree) model priors where
-        aln = makeSimulatedAlignment stdGen tree len
+newSimulation origAln origTree tree model priors stdGen dataType classes len = addModelFx (structDataN classes dataType (pAln) origTree) model priors where
+        aln = makeSimulatedAlignmentWithGaps stdGen tree origAln
         pAln = pAlignment aln
 
 --patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
