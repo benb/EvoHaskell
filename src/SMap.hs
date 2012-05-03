@@ -35,6 +35,9 @@ import Phylo.NLOpt
 import System.ProgressBar
 import Text.Printf
 import System.IO.Temp
+import System.FilePath (pathSeparator)
+import Data.Binary
+import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as UVec
 
 data LMat = Inter | Intra deriving Show
@@ -296,57 +299,58 @@ main = do args <- getArgs
                                                let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
                                                let numThreads = Sync.numCapabilities-1
                                                let finishcalc tempdir = do 
-                                                     let (simStochInter,simStochIntra) = if (nClasses==1) then 
-                                                           if (numThreads > 1)
-                                                                then (undefined,(map snd simS) `using` parBuffer numThreads rdeepseq)
-                                                                else (undefined,map snd simS)
-                                                            else if (numThreads > 1) 
-                                                                then unzip (simS `using` parBuffer numThreads rdeepseq)
-                                                                else unzip simS
+                                                     putStrLn tempdir
                                                      outputProgressInit 100 (fromIntegral numSim)
-                                                     outputProgress (const $ return ()) 100 (fromIntegral numSim) 1 simStochIntra
-                                                     let outputMat (name,simStochDesc,ansDesc) = do
+                                                     let simS' = simS `using` parBuffer numThreads rdeepseq
+                                                     let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
+                                                                               BS.writeFile name (encode x)
+                                                                               outputProgress 100 (fromIntegral numSim) i 
+                                                                               return name
+                                                     simFiles <- mapM (\(i,d) -> writeOut i "stoch" d) $ zip [1..] simS'
+                                                     putStrLn "" --finish output bar
+                                                     let readIn name = do mydata <- BS.readFile name
+                                                                          let ans = (decode mydata) :: ([[Double]],[[Double]])
+                                                                          return ans
+                                                     let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
                                                                                               let tot x = foldr (+) (0.0) x
-                                                                                              putStrLn "1"
-                                                                                              when raw $ do writeRaw (name ++"-boot-raw.txt") $ (concat . concat) simStochDesc
-                                                                                                            writeRaw (name ++"-boot-edge.txt") $ concat (map (map tot) simStochDesc)
-                                                                                                            writeRaw (name ++"-boot-site.txt") $ concat (map (map tot) $ map transpose simStochDesc)
-                                                                                                            writeRaw (name ++"-real-raw.txt") $ concat ansDesc
-                                                                                                            writeRaw (name ++"-real-edge.txt") $ map tot ansDesc
-                                                                                                            writeRaw (name ++"-real-site.txt") $ map tot $ transpose ansDesc
-                                                                                              putStrLn "2"
-                                                                                              let (line,lower,upper,pval) = makeQQLine numQuantile (map concat simStochDesc) (concat ansDesc)
-                                                                                              let (line1,lower1,upper1,pval1) = makeQQLine numQuantile (map (map tot) simStochDesc) (map tot ansDesc)
-                                                                                              let (line2,lower2,upper2,pval2) = makeQQLine numQuantile (map (map tot)  $ map transpose simStochDesc) (map tot $ transpose ansDesc)
-                                                                                              let edgeQuantileMap = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) simStochDesc) (map tot ansDesc))
-                                                                                              let tempTree = annotateTreeWith edgeQuantileMap t2
-                                                                                              print edgeQuantileMap
-                                                                                              putStrLn "2x"
-                                                                                              writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith edgeQuantileMap t2)
-                                                                                              putStrLn "2a"
+                                                                                              let readIn' name = do ans <- readIn name
+                                                                                                                    return $ fx ans
+                                                                                              let qqFunc f2 proc x = do
+                                                                                                                   let boots = map f2 x
+                                                                                                                   let real = f2 ansDesc
+                                                                                                                   when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
+                                                                                                                                 writeRaw (name ++"-real-" ++ proc ++".txt") $ real
+                                                                                                                   return $ makeQQLine numQuantile boots real
+                                                                                              (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
+                                                                                              renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
+                                                                                              putMVar m1 ()
+                                                                                              (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
+                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
+                                                                                              putMVar m1 ()
+                                                                                              (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
+                                                                                              renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
+                                                                                              putMVar m1 ()
+                                                                                              let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
+                                                                                              eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
+                                                                                              let tempTree = annotateTreeWith eQM t2
+                                                                                              writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
+                                                                                              putMVar m1 ()
                                                                                               writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
-                                                                                              putStrLn "2b"
-                                                                                              m1 <- newEmptyMVar
-                                                                                              renderableToPDFFileM m1 (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-out-all.pdf"
-                                                                                              putStrLn "3"
-                                                                                              renderableToPDFFileM m1 (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-out-edge.pdf"
-                                                                                              putStrLn "4"
-                                                                                              renderableToPDFFileM m1 (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-out-site.pdf"
-                                                                                              putStrLn "5"
-                                                                                              return m1
+                                                                                              putMVar m1 ()
+                                                     --intra
                                                      let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
+                                                     m1<-newEmptyMVar
+                                                     forkIO $ outputMat ("subs",snd,m1,simFiles,ansIntra)
                                                      let prog mVar y x = do 
                                                          putChar '\r'
-                                                         --takeMVar mVar
+                                                         takeMVar mVar
                                                          putStr $ mkProgressBar (msg "plotting") exact 100 x y
-                                                     m1<-outputMat ("subs",simStochIntra,ansIntra)
-                                                     if (nClasses==1) 
-                                                       then do putStr $ mkProgressBar (msg "plotting") exact 100 0 3
-                                                               mapM_ (prog m1 3) [1..3]
-                                                       else do putStr $ mkProgressBar (msg "plotting") exact 100 0 6
-                                                               m2<-outputMat ("switch",simStochInter,stochmapTT (interLMat nClasses 20) t2)
-                                                               mapM_ (prog m1 6) [1..3]
-                                                               mapM_ (prog m2 6) [4..6] 
+                                                     if nClasses==1
+                                                        then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
+                                                                mapM_ (prog m1 5) [1..5]
+                                                        else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
+                                                                forkIO $ outputMat ("switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
+                                                                mapM_ (prog m1 10) [1..10]
                                                      putStrLn ""
                                                      putStrLn " done"
                                                      return Nothing
@@ -358,17 +362,12 @@ main = do args <- getArgs
 
 --outputProgress :: Int -> [a] -> IO ()
 outputProgressInit width numSim = putStr $ mkProgressBar (msg "bootstrapping")  exact width 0 numSim
-outputProgress f width numSim i [] = putStrLn "" --progressBar (msg "bootstrapping") exact width i numSim
-outputProgress f width numSim i (x:xs) = do let m = x `deepseq` (mkProgressBar (msg "bootstrapping") exact width i numSim)
-                                            f x 
-                                            putChar '\r'
-                                            putStr m
-                                            outputProgress f width numSim (i+1) xs
+outputProgress width numSim i = do 
+   putChar '\r'
+   putStr $ mkProgressBar (msg "bootstrapping") exact width i numSim
 
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
 
-renderableToPDFFileM mvar a b c d = do renderableToPDFFile a b c d
-                                       --putMVar mvar ()
 
 dualStochMap stochmapTT a b x = (stochmapTT a x, stochmapTT b x)
 length2 = map length
