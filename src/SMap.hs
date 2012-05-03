@@ -258,7 +258,9 @@ main = do args <- getArgs
                                                      exitFailure
                                        x       -> return x
           let t = tree'
-          let a = fromJust aln'
+          let a = case aln' of 
+                        Nothing -> trace "\nERROR: You need to specify an alignment" undefined
+                        Just x  -> x 
           logger "Debugging enabled"
           let debugtrace = case debugging of 
                                      True  -> trace 
@@ -275,6 +277,14 @@ main = do args <- getArgs
           let (t2',priors,nClasses) = case modelParams of 
                                            Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
                                            Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
+          case simulateOnly of 
+                        Just alnLength -> do let emptyAlignment = quickListAlignment (Phylo.Tree.names t) [] 
+                                             let emptyTree= case modelParams of 
+                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) AminoAcid (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
+                                                                   Ras a      -> addModelFx (structDataN 1 AminoAcid (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
+                                             mapM putStr $ toFasta $ makeSimulatedAlignment stdGen (cachedBranchModelTree emptyTree) alnLength 
+                                             exitSuccess
+                        Nothing        -> return ()
           let nState = nClasses * 20
           let tol = case optBoot of
                            (FullOpt level) -> min level 1E-2
