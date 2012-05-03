@@ -351,7 +351,7 @@ main = do args <- getArgs
                                  (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
                                  renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
                                  putMVar m1 ()
-                                 (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
+                                 (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" =<< mapM readIn' simStochDescFiles 
                                  renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
                                  putMVar m1 ()
                                  let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
