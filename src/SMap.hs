@@ -265,17 +265,16 @@ main = do args <- getArgs
                                                                 (FullOpt level) -> min level 1E-2
                                                                 _               -> 1E-2
                                                (t2,params) <- case optMethod of 
-                                                                                       OptNone                        -> return $ (cachedBranchModelTree t2',initparams)
-                                                                                       (OptMethod _)                  -> do putStrLn "optimising model"
-                                                                                                                            let ans = optF tol t2' initparams
-                                                                                                                            let start = head ans
-                                                                                                                            putStr $ getNiceOpt 100 $ head ans
-                                                                                                                            mapM (\x -> do putChar '\r'
-                                                                                                                                           printNiceOpt 100 x) (zip ans (tail ans))
-                                                                                                                            let (a,b,_) = last ans
-                                                                                                                            putStrLn ""
-                                                                                                                            return (cachedBranchModelTree a,b)
-
+                                                               OptNone         -> return $ (cachedBranchModelTree t2',initparams)
+                                                               (OptMethod _)   -> do putStrLn "optimising model"
+                                                                                     let ans = optF tol t2' initparams
+                                                                                     let start = head ans
+                                                                                     putStr $ getNiceOpt 100 $ head ans
+                                                                                     mapM (\x -> do putChar '\r'
+                                                                                                    printNiceOpt 100 x) (zip ans (tail ans))
+                                                                                     let (a,b,_) = last ans
+                                                                                     putStrLn ""
+                                                                                     return (cachedBranchModelTree a,b)
                                                logger $ "Main model params " ++ (show params)
                                                let aX = map (fst . leftSplit) $ getAllF t2
                                                let bX = getLeftSplit t2
@@ -312,32 +311,32 @@ main = do args <- getArgs
                                                                           let ans = (decode mydata) :: ([[Double]],[[Double]])
                                                                           return ans
                                                      let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
-                                                                                              let tot x = foldr (+) (0.0) x
-                                                                                              let readIn' name = do ans <- readIn name
-                                                                                                                    return $ fx ans
-                                                                                              let qqFunc f2 proc x = do
-                                                                                                                   let boots = map f2 x
-                                                                                                                   let real = f2 ansDesc
-                                                                                                                   when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
-                                                                                                                                 writeRaw (name ++"-real-" ++ proc ++".txt") $ real
-                                                                                                                   return $ makeQQLine numQuantile boots real
-                                                                                              (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
-                                                                                              renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
-                                                                                              putMVar m1 ()
-                                                                                              (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
-                                                                                              renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
-                                                                                              putMVar m1 ()
-                                                                                              (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
-                                                                                              renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
-                                                                                              putMVar m1 ()
-                                                                                              let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
-                                                                                              eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
-                                                                                              let tempTree = annotateTreeWith eQM t2
-                                                                                              writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
-                                                                                              putMVar m1 ()
-                                                                                              writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
-                                                                                              putMVar m1 ()
-                                                     --intra
+                                                                      let tot x = foldr (+) (0.0) x
+                                                                      let readIn' name = do ans <- readIn name
+                                                                                            return $ fx ans
+                                                                      let qqFunc f2 proc x = do
+                                                                                           let boots = map f2 x
+                                                                                           let real = f2 ansDesc
+                                                                                           when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
+                                                                                                         writeRaw (name ++"-real-" ++ proc ++".txt") $ real
+                                                                                           return $ makeQQLine numQuantile boots real
+                                                                      (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
+                                                                      renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
+                                                                      putMVar m1 ()
+                                                                      (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
+                                                                      renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
+                                                                      putMVar m1 ()
+                                                                      (line2,lower2,upper2,pval2) <- qqFunc (map tot) "site" =<< mapM readIn' simStochDescFiles 
+                                                                      renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
+                                                                      putMVar m1 ()
+                                                                      let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
+                                                                      eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
+                                                                      let tempTree = annotateTreeWith eQM t2
+                                                                      writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
+                                                                      putMVar m1 ()
+                                                                      writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
+                                                                      putMVar m1 ()
+                             --intra
                                                      let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
                                                      m1<-newEmptyMVar
                                                      forkIO $ outputMat ("subs",snd,m1,simFiles,ansIntra)
