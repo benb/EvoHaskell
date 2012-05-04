@@ -61,8 +61,11 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['h'] ["help"] (NoArg printHelp) "print help"
           , Option ['m'] ["model"] (ReqArg optSubR "SUBMODEL") "model (wag or wag,F (default) or jtt or jtt,F or <customFile> or <customFile>,F)"
           , Option [] ["simulate"] (ReqArg optSimulateR "LENGTH") "simulate a sequence alignment from given model"
+          , Option ['p'] ["threads"] (ReqArg setThreads "THREADS") "set number of threads to use in calculation (default 1)"
             ]
 
+setThreads arg opt = do Sync.setNumCapabilities (read arg)
+                        return opt
 
 printHelp opt = do putStrLn $ usageInfo header options
                    putStrLn example
