@@ -38,6 +38,7 @@ import System.IO.Temp
 import System.FilePath (pathSeparator)
 import Data.Binary
 import Data.Maybe
+import System.IO.Unsafe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as UVec
 
@@ -318,19 +319,19 @@ main = do args <- getArgs
                   then error "Bug in smap, please report"
                   else return $ ()
           let nProc = length priors
-          let stochmapTT lM tree = discrep $ stochmapOrder (stochmapT nProc nState (getAln tree) lM tree) (treeToMap tree) (getPriors tree)
-          let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT nProc nState a lM tree) (treeToMap tree) (getPriors tree)
+          --stochmapHandle <- openFile "stochmap.out" WriteMode
+          --let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT (Just stochmapHandle) nProc nState a lM tree) (mapBack a) (getPriors tree)
+          let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT Nothing nProc nState a lM tree) (mapBack a) (getPriors tree)
           let numQuantile = 500
           let stdGens = take numSim $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
           let simulations s = case (optBoot,optMethod) of 
-                                 (FullOpt level,_) -> map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ simulate s
-                                 (BranchOpt,_) -> map optBLDFull0 $ simulate s
-                                 (QuickBranchOpt,_) -> map optBLDFull0 $ simulate s
-                                 (NoOpt,_) -> simulate s 
-                                 where simulate x = map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) x
-                                 --where simulate x = replicate (length x) $ head $ map (\x-> patternSimulation t t2 (modelF params) priors x AminoAcid nClasses alnLength) x                              j
-          let simS = map (dualStochMap stochmapTT (interLMat nClasses 20) (intraLMat nClasses 20)) (simulations stdGens)
+                                 (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ trees,alignments)
+                                 (BranchOpt,_) -> (map optBLDFull0 trees,alignments)
+                                 (QuickBranchOpt,_) -> (map optBLDFull0 trees,alignments)
+                                 (NoOpt,_) -> (trees,alignments)
+                                 where (trees,alignments) = unzip $ map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) s
+          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
           let numThreads = Sync.numCapabilities-1
           let finishcalc tempdir = do 
                 putStrLn tempdir
@@ -371,8 +372,7 @@ main = do args <- getArgs
                                  putMVar m1 ()
                                  writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
                                  putMVar m1 ()
-          
-                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
+                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 pAln
                 m1<-newEmptyMVar
                 forkIO $ outputMat (prefix++"-subs",snd,m1,simFiles,ansIntra)
                 let prog mVar y x = do 
@@ -383,7 +383,7 @@ main = do args <- getArgs
                    then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
                    else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
-                           forkIO $ outputMat (prefix++"-switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
+                           forkIO $ outputMat (prefix++"-switch",fst,m1,simFiles,stochmapTTA (interLMat nClasses 20) t2 pAln)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
                 putStrLn " done"
@@ -400,7 +400,7 @@ outputProgress width numSim i = do
 writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
 
 
-dualStochMap stochmapTT a b x = (stochmapTT a x, stochmapTT b x)
+dualStochMap stochmapTT lM1 lM2 (t,a) = (stochmapTT lM1 t a, stochmapTT lM2 t a) 
 length2 = map length
 length3 = map length2
 
@@ -441,7 +441,6 @@ makeQQLine numQuantile simulated empirical = (empQuantile,lower,upper,pvalue) wh
                                         lower = map (!!lowerI) revQuantileSimS
                                         upper = map (!!upperI) revQuantileSimS
 
-treeToMap tree = mapBack $ pAlignment $ getAln tree
 
 
 splitBy delim s = ans where
@@ -562,24 +561,12 @@ optThmmModel method numModels cats pi s cutoff t2 params = optBSParamsBL cutoff 
         upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
         myModel = thmmModel (cats+1) s pi
 
---this is a bit of a hack really
---all the data needed is in modelTree
---but this hack will 'recompress' the data
---to site patterns
-patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
-                             ans = addModelFx (structDataN classes AminoAcid (pAln) origTree) model priors 
-                             pAln = pAlignment $ lAln
-                             lAln = getAln $ makeSimulatedTree AminoAcid classes stdGen len modelTree 
-
-newSimulation origAln origTree tree model priors stdGen dataType classes len = addModelFx (structDataN classes dataType (pAln) origTree) model priors where
+newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN classes dataType (pAln) origTree) model priors,pAln) where
         aln = makeSimulatedAlignmentWithGaps stdGen tree origAln
         pAln = pAlignment aln
 
---patternSimulation origTree modelTree model priors stdGen dataType classes len = ans where
---                             ans = makeSimulatedTree AminoAcid classes stdGen len modelTree 
 
-
-getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts) where
+getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts) 
 
 cramerVonMises empQ theQs = pvalue where
         v = fromIntegral $ length empQ
@@ -589,9 +576,8 @@ cramerVonMises empQ theQs = pvalue where
         square x = x*x
         pvalue = (fromIntegral $ length (filter (<=wv2_emp) wv2_thes)) / (fromIntegral $ length theQs)
 
-stochmapT nProc nState aln' lM tree = calculateStochmap nSite nState nBranch nProc nCols lM multiplicites sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' where
+stochmapT fh nProc nState pAln' lM tree = unsafePerformIO $ calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' fh where
         sitemap' = mapBack pAln'
-        pAln' = pAlignment aln'
         (nSite,nCols,multiplicites) = getAlnData pAln' --nCols >= nSite by stochmap.c definition.
         nBranch =  length $ toPBELengths pBEStr
         pBEStr = getPartialBranchEnds tree
