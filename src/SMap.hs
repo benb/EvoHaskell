@@ -48,6 +48,7 @@ data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String deriv
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['t'] ["tree"] (ReqArg optTreeR "FILE") "Tree"
+          , Option ['j'] ["job-name"] (ReqArg (\arg opt -> return opt {optJobName=Just arg}) "JOBID") "set job name (required)"
           , Option [] ["num-cats"] (ReqArg optNumCatsR "NUMGAMMACATS") "Number of Gamma Rate Categories" 
           , Option ['n'] ["bootstrap"] (ReqArg optBootCountR "BOOTSTRAPS") "Number of bootstraps to perform"
           , Option ['s'] ["seed"] (ReqArg optSeedR "SEED") "RNG seed"
@@ -143,7 +144,8 @@ data Options = Options  {
         optLog :: Logger,
         optDebug :: Bool,
         optSub :: SubModel,
-        optSimulateOnly :: Maybe Int
+        optSimulateOnly :: Maybe Int,
+        optJobName :: Maybe String
 } deriving Show
 
 nullOut :: Logger
@@ -167,7 +169,8 @@ defaultOptions = Options {
         optLog = nullOut,
         optDebug = False,
         optSub = WAGF,
-        optSimulateOnly = Nothing
+        optSimulateOnly = Nothing,
+        optJobName = Nothing
 }
 
 -- alpha sigma pInv | alpha
@@ -235,9 +238,13 @@ main = do args <- getArgs
                   optLog = log,
                   optDebug = debugging,
                   optSub = subModel,
-                  optSimulateOnly = simulateOnly
+                  optSimulateOnly = simulateOnly,
+                  optJobName = jobName
           } = opts
-          let (Logger logger) = log
+          let prefix = case jobName of
+                Nothing -> error "Please set a job name with -j"
+                Just a -> a
+          let (Logger logger) = prefix `seq` log
           logger $ show opts
           logger $ show seed
           logger $ show numSim
@@ -367,7 +374,7 @@ main = do args <- getArgs
           
                 let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 a
                 m1<-newEmptyMVar
-                forkIO $ outputMat ("subs",snd,m1,simFiles,ansIntra)
+                forkIO $ outputMat (prefix++"-subs",snd,m1,simFiles,ansIntra)
                 let prog mVar y x = do 
                     putChar '\r'
                     takeMVar mVar
@@ -376,7 +383,7 @@ main = do args <- getArgs
                    then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
                    else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
-                           forkIO $ outputMat ("switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
+                           forkIO $ outputMat (prefix++"-switch",fst,m1,simFiles,stochmapTT (interLMat nClasses 20) t2)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
                 putStrLn " done"
