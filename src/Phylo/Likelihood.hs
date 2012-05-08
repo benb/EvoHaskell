@@ -168,7 +168,10 @@ logLikelihood = logLikelihoodModel
 data PatternAlignment = PatternAlignment {names :: [String], seqs::[String], columns::[String], patterns::[String], counts::[Int]}
 
 pAlignment (ListAlignment names seqs columns) = PatternAlignment names seqs columns patterns counts where
-                                                   (patterns,counts) = unzip $ map (\x -> (head x,length x)) $ group $ sort columns
+                                                   --(patterns,counts) = unzip $ map (\x -> (head x,length x)) $ group $ sort columns
+                                                   --lets keep the order (initial slow impl)
+                                                   patterns = nub columns
+                                                   counts = map (\x->length $ findIndices (==x) columns) patterns 
 mapBack :: PatternAlignment -> [Int]
 mapBack (PatternAlignment _ _ columns patterns _) = map (\x->fromJust $ findIndex (==x) patterns) columns
 
