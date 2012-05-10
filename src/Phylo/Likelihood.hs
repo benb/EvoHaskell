@@ -1,5 +1,9 @@
 {-# Language ScopedTypeVariables,CPP #-}
-module Phylo.Likelihood where
+module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
+       DNode(DLeaf,DINode,DTree),PatternAlignment(PatternAlignment),addModelFx,structDataN
+       ,mapBack,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds
+       ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
+       ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
