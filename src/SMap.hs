@@ -41,6 +41,7 @@ import Data.Maybe
 import System.IO.Unsafe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as UVec
+import qualified Text.JSON as JSON
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
@@ -350,10 +351,20 @@ main = do args <- getArgs
                                  let tot x = foldr (+) (0.0) x
                                  let readIn' name = do ans <- readIn name
                                                        return $ fx ans
+
+                                 when raw $ do 
+                                     writeFile (name ++ "-real-raw.txt") $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) ansDesc
+                                     let writeFiles x = writeFile (name ++ "-boot.raw") $ unlines $ map (annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2)) x
+                                     withFile (name ++ "-boot-raw.txt") WriteMode $ (\fh ->
+                                        do mydata <- mapM readIn' simStochDescFiles
+                                           let mydata'  = map (annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2)) mydata
+                                           mapM (hPutStr fh) mydata' )
+                                     return ()
                                  let qqFunc f2 proc x = do
                                                       let boots = map f2 x
                                                       let real = f2 ansDesc
-                                                      when raw $ do writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
+                                                      when (raw && proc/="raw") $ do
+                                                                    writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
                                                       return $ makeQQLine numQuantile boots real
                                  (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
@@ -389,6 +400,13 @@ main = do args <- getArgs
                 putStrLn " done"
                 return Nothing
           withSystemTempDirectory "smap" finishcalc 
+
+
+annotatedSplits splits columns = unlines $ map s $ zip (map annotate splits) (map p columns) where
+        annotate (a,b) = (showList "," a) ++ " " ++ (showList "," b)
+        showList x = foldr (++) "" . intersperse x 
+        p = showList " " . map show
+        s (a,b) = a ++ " " ++ b
 
 
 --outputProgress :: Int -> [a] -> IO ()
