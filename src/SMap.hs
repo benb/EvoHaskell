@@ -323,7 +323,6 @@ main = do args <- getArgs
           --stochmapHandle <- openFile "stochmap.out" WriteMode
           --let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT (Just stochmapHandle) nProc nState a lM tree) (mapBack a) (getPriors tree)
           let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT Nothing nProc nState a lM tree) (mapBack a) (getPriors tree)
-          let numQuantile = 500
           let stdGens = take numSim $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
           let simulations s = case (optBoot,optMethod) of 
@@ -363,10 +362,11 @@ main = do args <- getArgs
                                  let qqFunc f2 proc x = do
                                                       let boots = map f2 x
                                                       let real = f2 ansDesc
+                                                      let numQ = length real -- is this worth optimising?
                                                       when (raw && proc/="raw") $ do
                                                                     writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
-                                                      return $ makeQQLine numQuantile boots real
+                                                      return $ makeQQLine numQ boots real
                                  (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
                                  renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
                                  putMVar m1 ()
@@ -376,7 +376,7 @@ main = do args <- getArgs
                                  (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" =<< mapM readIn' simStochDescFiles 
                                  renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
                                  putMVar m1 ()
-                                 let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile numQuantile (map (map tot) x) (map tot ansDesc))
+                                 let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile (map (map tot) x) (map tot ansDesc))
                                  eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
                                  let tempTree = annotateTreeWith eQM t2
                                  writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
@@ -431,8 +431,9 @@ discrep :: ([[Double]], [Double]) -> [[Double]]
 discrep ((x:xs),(y:ys)) = (map (\i->i-y) x):(discrep (xs,ys))
 discrep ([],[]) = []
 
-perLocationQuantile :: Int -> [[Double]] -> [Double] -> [Double]
-perLocationQuantile numQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fromIntegral . (reverseQuantile simQuantiles)) locdist where
+perLocationQuantile :: [[Double]] -> [Double] -> [Double]
+perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fromIntegral . (reverseQuantile simQuantiles)) locdist where
+        numQuantile = length locdist
         quantileF d q = continuousBy medianUnbiased q numQuantile d
         simVec = UVec.fromList $ concat simulated
         simQuantiles = map (quantileF simVec) [0..numQuantile]
