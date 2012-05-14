@@ -453,7 +453,7 @@ makeQQLine numQuantile simulated empirical = (empQuantile,lower,upper,pvalue) wh
                                         revQuantileSimS = map sort $ transpose revQuantileSimS'
                                         revQuantileSimS' = map revQuantile simulated
                                         empQuantile = revQuantile empirical
-                                        pvalue = cramerVonMises empQuantile revQuantileSimS'
+                                        pvalue = 1.0 - (cramerVonMises empQuantile revQuantileSimS')
 
                                         lowerI = floor $ (fromIntegral numSim) * 0.025
                                         upperI = (ceiling ((fromIntegral numSim) * 0.975)) - 1 
