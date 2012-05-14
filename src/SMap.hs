@@ -362,11 +362,10 @@ main = do args <- getArgs
                                  let qqFunc f2 proc x = do
                                                       let boots = map f2 x
                                                       let real = f2 ansDesc
-                                                      let numQ = length real -- is this worth optimising?
                                                       when (raw && proc/="raw") $ do
                                                                     writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
-                                                      return $ makeQQLine numQ boots real
+                                                      return $ makeQQLine boots real
                                  (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
                                  renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
                                  putMVar m1 ()
@@ -439,27 +438,46 @@ perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fr
         simQuantiles = map (quantileF simVec) [0..numQuantile]
 
 
-                  
-makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double)
-makeQQLine numQuantile simulated empirical = (empQuantile,lower,upper,pvalue) where
-                                        revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
-                                        revQuantileRawF x = UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
 
-                                        quantileF d q = continuousBy medianUnbiased q numQuantile d
-                                        simVec = UVec.fromList $ concat simulated
-                                        simQuantiles = map (quantileF simVec) [0..numQuantile]
+-- number of Quantiles needed
+-- simulated data [sim_n [edge/site]]
 
-                                        numSim = length simulated
-                                        revQuantileSimS = map sort $ transpose revQuantileSimS'
-                                        revQuantileSimS' = map revQuantile simulated
-                                        empQuantile = revQuantile empirical
-                                        pvalue = 1.0 - (cramerVonMises empQuantile revQuantileSimS')
+makeQQLine :: [[Double]] -> [Double] -> ([Double],[Double],[Double],Double) 
+makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
+        simcount = fromIntegral $ length simulated
+        numQ = 2 * (length $ head simulated)
+        fvals = UVec.fromList $ map f $ zip empirical (transpose simulated)
+        f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / simcount
+        empQ k = continuousBy medianUnbiased k numQ fvals
+        empQuantile = map empQ [1,3..(2*numQ)]
+        lower = empQuantile
+        upper = empQuantile
+        uniformQ = map (\i -> (i - 0.5) / numQ) [1..numQ]
+        pvalue = 1.0 - (cramerVonMises empQuantile 
 
-                                        lowerI = floor $ (fromIntegral numSim) * 0.025
-                                        upperI = (ceiling ((fromIntegral numSim) * 0.975)) - 1 
-                                        lower = map (!!lowerI) revQuantileSimS
-                                        upper = map (!!upperI) revQuantileSimS
 
+--makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double)
+--makeQQLine numQuantile simulated empirical = (empQuantile,lower,upper,pvalue) where
+--                                        revQuantile x = map (quantileF (revQuantileRawF x)) [0..numQuantile]
+--                                    
+--                                        revQuantileRawF x = UVec.fromList $ map (\y->(fromIntegral $ reverseQuantile simQuantiles y)/(fromIntegral numQuantile)) x
+--
+--                                        quantileF d q = continuousBy medianUnbiased q numQuantile d
+--                                        tSim = transpose simulated
+--                                        simVec i = UVec.fromList $ (tSim !! i)
+--                                        simQuantiles = map (\x -> quantileF (simVec x) x) [0..numQuantile]
+--
+--                                        numSim = length simulated
+--                                        revQuantileSimS' = map revQuantile simulated
+--                                        revQuantileSimS = map sort $ transpose revQuantileSimS'
+--                                        empQuantile = revQuantile empirical
+--                                        pvalue = 1.0 - (cramerVonMises empQuantile revQuantileSimS')
+--
+--                                        lowerI = floor $ (fromIntegral numSim) * 0.025
+--                                        upperI = (ceiling ((fromIntegral numSim) * 0.975)) - 1 
+--                                        lower = map (!!lowerI) revQuantileSimS
+--                                        upper = map (!!upperI) revQuantileSimS
+--
 
 
 splitBy delim s = ans where
