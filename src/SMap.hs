@@ -35,7 +35,7 @@ import Data.Time.Clock
 import Phylo.NLOpt
 import System.ProgressBar
 import Text.Printf
-import System.IO.Temp
+import System.Unix.Directory (withTemporaryDirectory)
 import System.FilePath (pathSeparator)
 import Data.Binary
 import Data.Maybe
@@ -68,8 +68,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['p'] ["threads"] (ReqArg setThreads "THREADS") "set number of threads to use in calculation (default 1)"
             ]
 
-setThreads arg opt = do Sync.setNumCapabilities (read arg)
-                        return opt
+setThreads arg opt = return opt {optThreads = (read arg)} 
 
 printHelp opt = do putStrLn $ usageInfo header options
                    putStrLn example
@@ -148,7 +147,8 @@ data Options = Options  {
         optDebug :: Bool,
         optSub :: SubModel,
         optSimulateOnly :: Maybe Int,
-        optJobName :: Maybe String
+        optJobName :: Maybe String,
+        optThreads :: Int
 } deriving Show
 
 nullOut :: Logger
@@ -173,7 +173,8 @@ defaultOptions = Options {
         optDebug = False,
         optSub = WAGF,
         optSimulateOnly = Nothing,
-        optJobName = Nothing
+        optJobName = Nothing,
+        optThreads = 1
 }
 
 -- alpha sigma pInv | alpha
@@ -242,7 +243,8 @@ main = do args <- getArgs
                   optDebug = debugging,
                   optSub = subModel,
                   optSimulateOnly = simulateOnly,
-                  optJobName = jobName
+                  optJobName = jobName,
+                  optThreads = numThreads
           } = opts
           let prefix = case jobName of
                 Nothing -> error "Please set a job name with -j"
@@ -304,10 +306,8 @@ main = do args <- getArgs
                            _               -> 1E-2
 
           --manual control of threading
-          let numThreads = Sync.numCapabilities
-          --Sync.setNumCapabilities 1
           BLAS.set_num_threads numThreads
-          logger $ "Set threads " ++ "1/" ++ (show numThreads)
+          logger $ "Set threads " ++ "1/" ++ (show numThreads) ++ "/1"
 
           (t2,params) <- case optMethod of 
                           OptNone         -> return $ (cachedBranchModelTree t2',initparams)
@@ -322,11 +322,21 @@ main = do args <- getArgs
                                                 return (cachedBranchModelTree a,b)
          
           --manual control of threading
-          Sync.setNumCapabilities numThreads
-          BLAS.set_num_threads 1
-          logger $ "Set threads " ++ (show numThreads) ++ "/1"
-
-
+          let (jobThreads,blasThreads)  = case numThreads of 
+                                                        1 -> (1,1)
+                                                        2 -> (2,1)
+                                                        3 -> (3,1)
+                                                        4 -> (4,1)
+                                                        5 -> (4,1)
+                                                        6 -> (3,2)
+                                                        7 -> (3,2)
+                                                        8 -> (4,2)
+                                                        x | x < 17 -> (x `div` 2, 2)
+                                                        x -> (x `div` 4, 4)
+          let totThreads = numThreads - (jobThreads) * (blasThreads - 1)
+          Sync.setNumCapabilities (totThreads)
+          BLAS.set_num_threads blasThreads
+          logger $ "Set threads " ++ (show jobThreads) ++ "/" ++ (show blasThreads) ++ "/" ++ (show totThreads)
           logger $ "Main model params " ++ (show params)
           let aX = map (fst . leftSplit) $ getAllF t2
           let bX = getLeftSplit t2
@@ -347,9 +357,10 @@ main = do args <- getArgs
                                  (QuickBranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (NoOpt,_) -> (trees,alignments)
                                  where (trees,alignments) = unzip $ map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) s
-          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+          --let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+          let simS = replicate numSim $ head $ map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
           let finishcalc tempdir = do 
-                putStrLn tempdir
+                logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
                 let simS' = simS `using` parBuffer numThreads rdeepseq
                 let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
@@ -413,7 +424,7 @@ main = do args <- getArgs
                 putStrLn ""
                 putStrLn " done"
                 return Nothing
-          withSystemTempDirectory "smap" finishcalc 
+          withTemporaryDirectory "smap" finishcalc 
 
 
 annotatedSplits splits columns = unlines $ map s $ zip (map annotate splits) (map p columns) where
