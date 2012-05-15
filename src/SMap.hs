@@ -3,6 +3,7 @@ import System.Environment (getArgs)
 import System.Console.GetOpt
 import System.Exit
 import Phylo.Alignment
+import Phylo.OpenBLAS as BLAS
 import Data.List
 import Control.Monad
 import Control.Concurrent
@@ -301,6 +302,13 @@ main = do args <- getArgs
           let tol = case optBoot of
                            (FullOpt level) -> min level 1E-2
                            _               -> 1E-2
+
+          --manual control of threading
+          let numThreads = Sync.numCapabilities
+          --Sync.setNumCapabilities 1
+          BLAS.set_num_threads numThreads
+          logger $ "Set threads " ++ "1/" ++ (show numThreads)
+
           (t2,params) <- case optMethod of 
                           OptNone         -> return $ (cachedBranchModelTree t2',initparams)
                           (OptMethod _)   -> do putStrLn "optimising model"
@@ -312,9 +320,17 @@ main = do args <- getArgs
                                                 let (a,b,_) = last ans
                                                 putStrLn ""
                                                 return (cachedBranchModelTree a,b)
+         
+          --manual control of threading
+          Sync.setNumCapabilities numThreads
+          BLAS.set_num_threads 1
+          logger $ "Set threads " ++ (show numThreads) ++ "/1"
+
+
           logger $ "Main model params " ++ (show params)
           let aX = map (fst . leftSplit) $ getAllF t2
           let bX = getLeftSplit t2
+
           --print $ "OK? " ++ (show (aX==bX))
           if (aX/=bX)
                   then error "Bug in smap, please report"
@@ -332,7 +348,6 @@ main = do args <- getArgs
                                  (NoOpt,_) -> (trees,alignments)
                                  where (trees,alignments) = unzip $ map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) s
           let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
-          let numThreads = Sync.numCapabilities-1
           let finishcalc tempdir = do 
                 putStrLn tempdir
                 outputProgressInit 100 (fromIntegral numSim)
@@ -345,7 +360,7 @@ main = do args <- getArgs
                 putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
                                      let ans = (decode mydata) :: ([[Double]],[[Double]])
-                                     return ans
+                                     ans `seq` return ans
                 let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
                                  let tot x = foldr (+) (0.0) x
                                  let readIn' name = do ans <- readIn name
@@ -388,11 +403,11 @@ main = do args <- getArgs
                 let prog mVar y x = do 
                     putChar '\r'
                     takeMVar mVar
-                    putStr $ mkProgressBar (msg "plotting") exact 100 x y
+                    putStr $ mkProgressBar (msg "plotting    ") exact 100 x y
                 if nClasses==1
-                   then do putStr $ mkProgressBar (msg "plotting") exact 100 0 5
+                   then do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
-                   else do putStr $ mkProgressBar (msg "plotting") exact 100 0 10
+                   else do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 10
                            forkIO $ outputMat (prefix++"-switch",fst,m1,simFiles,stochmapTTA (interLMat nClasses 20) t2 pAln)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
@@ -444,16 +459,27 @@ perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fr
 
 makeQQLine :: [[Double]] -> [Double] -> ([Double],[Double],[Double],Double) 
 makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
-        simcount = fromIntegral $ length simulated
-        numQ = 2 * (length $ head simulated)
-        fvals = UVec.fromList $ map f $ zip empirical (transpose simulated)
-        f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / simcount
-        empQ k = continuousBy medianUnbiased k numQ fvals
-        empQuantile = map empQ [1,3..(2*numQ)]
-        lower = empQuantile
-        upper = empQuantile
-        uniformQ = map (\i -> (i - 0.5) / numQ) [1..numQ]
-        pvalue = 1.0 - (cramerVonMises empQuantile 
+        simcount = length simulated
+        numQ = min (length $ head simulated) simcount
+        f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / (fromIntegral simcount)
+
+        fval x = UVec.fromList $ map f $ zip x (transpose simulated)
+        fvals = fval empirical
+        fvalSim = map fval simulated
+
+        makeQ fv k = continuousBy medianUnbiased (2*k+1) (2*numQ) fv
+        makeAllQ fv = map (makeQ fv) [0,1..(numQ-1)]
+        empQuantile = makeAllQ fvals 
+        simQuantile = map makeAllQ fvalSim
+        simQuantile' = map UVec.fromList $ map sort $ transpose simQuantile
+        
+        pvalue = 1.0 - (cramerVonMises empQuantile simQuantile)
+        lowerI = floor $ (fromIntegral simcount) * 0.025
+        upperI = ceiling ((fromIntegral simcount) * 0.975) -1
+        lower = map (UVec.! lowerI) simQuantile'
+        upper = map (UVec.! upperI) simQuantile'
+
+
 
 
 --makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double)

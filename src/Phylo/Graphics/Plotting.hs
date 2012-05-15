@@ -31,7 +31,7 @@ makePlot qD nf otype = toRenderable layout where
 
     fg = opaque black 
     qLen = length qD
-    xvals =  [(fromIntegral x)/(fromIntegral qLen+1)|x<-[1..(qLen+1)]]
+    xvals =  [(fromIntegral ((2*x)+1))/(fromIntegral (2*qLen))|x<-[0..(qLen-1)]]
     xyvals :: [(Double,Double)]
     xyvals = zip xvals qD
     xyArea = zip xvals nf
