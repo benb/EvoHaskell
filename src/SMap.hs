@@ -23,7 +23,6 @@ import System.Posix.IO
 import Foreign.C.String (CString,newCString)
 import Phylo.Matrix
 import Stochmap
-import Data.Char (isSpace)
 import Phylo.PhyloXML
 import Statistics.Quantile
 import Phylo.Graphics.Plotting
@@ -362,7 +361,7 @@ main = do args <- getArgs
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
-                let simS' = simS `using` parBuffer numThreads rdeepseq
+                let simS' = simS `using` parBuffer jobThreads rdeepseq
                 let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
                                           BS.writeFile name (encode x)
                                           outputProgress 100 (fromIntegral numSim) i 
@@ -371,7 +370,7 @@ main = do args <- getArgs
                 putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
                                      let ans = (decode mydata) :: ([[Double]],[[Double]])
-                                     ans `seq` return ans
+                                     return ans
                 let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
                                  let tot x = foldr (+) (0.0) x
                                  let readIn' name = do ans <- readIn name
