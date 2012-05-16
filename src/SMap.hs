@@ -362,25 +362,20 @@ main = do args <- getArgs
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
                 let simS' = simS `using` parBuffer jobThreads rdeepseq
-                let writeOut i ext x = do let name = tempdir ++ [pathSeparator] ++ (show i) ++ ext
-                                          BS.writeFile name (encode x)
-                                          outputProgress 100 (fromIntegral numSim) i 
-                                          return name
-                simFiles <- mapM (\(i,d) -> writeOut i "stoch" d) $ zip [1..] simS'
+                mapM (\(i,j) -> j `seq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
                 putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
                                      let ans = (decode mydata) :: ([[Double]],[[Double]])
                                      return ans
-                let outputMat (name,fx,m1,simStochDescFiles,ansDesc) = do
+                let outputMat (name,fx,m1,ansDesc) = do
                                  let tot x = foldr (+) (0.0) x
-                                 let readIn' name = do ans <- readIn name
-                                                       return $ fx ans
+                                 let d = map fx simS'
 
                                  when raw $ do 
                                      writeFile (name ++ "-real-raw.txt") $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) ansDesc
                                      let writeFiles x = writeFile (name ++ "-boot.raw") $ unlines $ map (annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2)) x
                                      withFile (name ++ "-boot-raw.txt") WriteMode $ (\fh ->
-                                        do mydata <- mapM readIn' simStochDescFiles
+                                        do let mydata = d 
                                            let mydata'  = map (annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2)) mydata
                                            mapM (hPutStr fh) mydata' )
                                      return ()
@@ -391,17 +386,17 @@ main = do args <- getArgs
                                                                     writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
                                                       return $ makeQQLine boots real
-                                 (line,lower,upper,pval) <- qqFunc concat "raw"  =<< mapM readIn' simStochDescFiles 
+                                 (line,lower,upper,pval) <- qqFunc concat "raw"  d
                                  renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
                                  putMVar m1 ()
-                                 (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" =<< mapM readIn' simStochDescFiles 
+                                 (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" d
                                  renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
                                  putMVar m1 ()
-                                 (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" =<< mapM readIn' simStochDescFiles 
+                                 (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" d
                                  renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
                                  putMVar m1 ()
                                  let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile (map (map tot) x) (map tot ansDesc))
-                                 eQM <- return . edgeQuantileMap =<< mapM readIn' simStochDescFiles
+                                 let eQM = edgeQuantileMap d
                                  let tempTree = annotateTreeWith eQM t2
                                  writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
                                  putMVar m1 ()
@@ -409,7 +404,7 @@ main = do args <- getArgs
                                  putMVar m1 ()
                 let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 pAln
                 m1<-newEmptyMVar
-                forkIO $ outputMat (prefix++"-subs",snd,m1,simFiles,ansIntra)
+                forkIO $ outputMat (prefix++"-subs",snd,m1,ansIntra)
                 let prog mVar y x = do 
                     putChar '\r'
                     takeMVar mVar
@@ -418,7 +413,7 @@ main = do args <- getArgs
                    then do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
                    else do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 10
-                           forkIO $ outputMat (prefix++"-switch",fst,m1,simFiles,stochmapTTA (interLMat nClasses 20) t2 pAln)
+                           forkIO $ outputMat (prefix++"-switch",fst,m1,stochmapTTA (interLMat nClasses 20) t2 pAln)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
                 putStrLn " done"
