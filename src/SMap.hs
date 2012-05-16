@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns,ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts,BangPatterns,ScopedTypeVariables #-}
 import System.Environment (getArgs)
 import System.Console.GetOpt
 import System.Exit
@@ -42,6 +42,13 @@ import System.IO.Unsafe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Vector.Unboxed as UVec
 import qualified Text.JSON as JSON
+import qualified Statistics.Function as SF
+import qualified Data.Vector.Generic as G
+import Data.Vector.Generic ((!))
+import Statistics.Constants (m_epsilon)
+import Control.Exception (assert)
+
+
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
@@ -356,8 +363,8 @@ main = do args <- getArgs
                                  (QuickBranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (NoOpt,_) -> (trees,alignments)
                                  where (trees,alignments) = unzip $ map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) s
-          --let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
-          let simS = replicate numSim $ head $ map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+          --let simS = replicate numSim $ head $ map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
@@ -468,12 +475,11 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         numQ = min (length $ head simulated) simcount
         f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / (fromIntegral simcount)
 
-        fval x = UVec.fromList $ map f $ zip x (transpose simulated)
+        fval x = UVec.fromList $ sort $ map f $ zip x (transpose simulated)
         fvals = fval empirical
         fvalSim = map fval simulated
 
-        makeQ fv k = continuousBy medianUnbiased (2*k+1) (2*numQ) fv
-        makeAllQ fv = map (makeQ fv) [0,1..(numQ-1)]
+        makeAllQ = continuousAll hazen numQ 
         empQuantile = makeAllQ fvals 
         simQuantile = map makeAllQ fvalSim
         simQuantile' = map UVec.fromList $ map sort $ transpose simQuantile
@@ -485,6 +491,32 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         upper = map (UVec.! upperI) simQuantile'
 
 
+
+continuousAll' cParam q x = map (\k -> continuousBy cParam k q x) [0..q]
+
+{-# INLINE continuousAll #-}
+continuousAll :: G.Vector v Double =>
+                 ContParam  -- ^ Parameters /a/ and /b/.
+              -> Int        -- ^ /q/, the number of quantiles.
+              -> v Double   -- ^ /x/, the sample data.
+              -> [Double]
+continuousAll (ContParam a b) q x = 
+    assert (q >= 2) .
+    assert (G.all (not . isNaN) x) $
+    map pFunc [0..q]
+  where
+    sx              = x
+    bracket m       = min (max m 0) (n - 1)
+    eps             = m_epsilon * 4
+    n               = G.length x
+    pFunc k = (1-h) * item (j-1) + h * item j where 
+      j               = floor (t + eps)
+      t               = a + p * (fromIntegral n + 1 - a - b)
+      p               = fromIntegral k / fromIntegral q
+      h | abs r < eps = 0
+        | otherwise   = r
+        where r       = t - fromIntegral j
+      item            = (sx !) . bracket
 
 
 --makeQQLine :: Int -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double)
