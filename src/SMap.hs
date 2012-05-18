@@ -354,7 +354,9 @@ main = do args <- getArgs
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
-                let simS' = simS `using` parBuffer jobThreads rdeepseq
+                let simS' = case jobThreads of 
+                                1 -> simS
+                                _ -> simS `using` parBuffer jobThreads rdeepseq
                 mapM (\(i,j) -> j `seq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
                 putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
