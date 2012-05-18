@@ -312,7 +312,6 @@ main = do args <- getArgs
                            _               -> 1E-2
 
           --manual control of threading
-          BLAS.set_num_threads numThreads
           logger $ "Set threads " ++ "1/" ++ (show numThreads) ++ "/1"
 
           (t2,params) <- case optMethod of 
@@ -328,21 +327,8 @@ main = do args <- getArgs
                                                 return (cachedBranchModelTree a,b)
          
           --manual control of threading
-          let (jobThreads,blasThreads)  = case numThreads of 
-                                                        1 -> (1,1)
-                                                        2 -> (2,1)
-                                                        3 -> (3,1)
-                                                        4 -> (4,1)
-                                                        5 -> (4,1)
-                                                        6 -> (3,2)
-                                                        7 -> (3,2)
-                                                        8 -> (4,2)
-                                                        x | x < 17 -> (x `div` 2, 2)
-                                                        x -> (x `div` 4, 4)
-          let totThreads = numThreads - (jobThreads) * (blasThreads - 1)
-          Sync.setNumCapabilities (totThreads)
-          BLAS.set_num_threads blasThreads
-          logger $ "Set threads " ++ (show jobThreads) ++ "/" ++ (show blasThreads) ++ "/" ++ (show totThreads)
+          Sync.setNumCapabilities (numThreads)
+          let jobThreads=numThreads
           logger $ "Main model params " ++ (show params)
           let aX = map (fst . leftSplit) $ getAllF t2
           let bX = getLeftSplit t2
