@@ -47,6 +47,8 @@ import qualified Data.Vector.Generic as G
 import Data.Vector.Generic ((!))
 import Statistics.Constants (m_epsilon)
 import Control.Exception (assert)
+import qualified Data.Vector.Algorithms.Tim as Tim
+import Control.Monad.ST (runST)
 
 
 
@@ -463,14 +465,14 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         numQ = min (length $ head simulated) simcount
         f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / (fromIntegral simcount)
 
-        fval x = UVec.fromList $ sort $ map f $ zip x (transpose simulated)
+        fval x = timSort $ map f $ zip x (transpose simulated)
         fvals = fval empirical
         fvalSim = map fval simulated
 
         makeAllQ = continuousAll medianUnbiased numQ 
         empQuantile = makeAllQ fvals 
         simQuantile = map makeAllQ fvalSim
-        simQuantile' = map UVec.fromList $ map sort $ transpose simQuantile
+        simQuantile' = map timSort $ transpose simQuantile
         
         pvalue = 1.0 - (cramerVonMises empQuantile simQuantile)
         lowerI = floor $ (fromIntegral simcount) * 0.025
@@ -478,6 +480,10 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         lower = map (UVec.! lowerI) simQuantile'
         upper = map (UVec.! upperI) simQuantile'
 
+timSort list = runST $ do 
+  vec <- UVec.thaw $ UVec.fromList list
+  Tim.sort vec
+  UVec.freeze vec
 
 
 continuousAll' cParam q x = map (\k -> continuousBy cParam k q x) [0..q]
