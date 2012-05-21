@@ -467,14 +467,14 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         fvals = fval empirical
         fvalSim = map fval simulated
 
-        makeAllQ = continuousAll hazen numQ 
+        makeAllQ = continuousAll medianUnbiased numQ 
         empQuantile = makeAllQ fvals 
         simQuantile = map makeAllQ fvalSim
         simQuantile' = map UVec.fromList $ map sort $ transpose simQuantile
         
         pvalue = 1.0 - (cramerVonMises empQuantile simQuantile)
         lowerI = floor $ (fromIntegral simcount) * 0.025
-        upperI = ceiling ((fromIntegral simcount) * 0.975) -1
+        upperI = ceiling ((fromIntegral simcount) * 0.975)
         lower = map (UVec.! lowerI) simQuantile'
         upper = map (UVec.! upperI) simQuantile'
 
