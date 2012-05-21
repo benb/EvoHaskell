@@ -357,7 +357,7 @@ main = do args <- getArgs
                 let simS' = case jobThreads of 
                                 1 -> simS
                                 _ -> simS `using` parBuffer jobThreads rdeepseq
-                mapM (\(i,j) -> j `seq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
+                mapM (\(i,j) -> j `deepseq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
                 putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
                                      let ans = (decode mydata) :: ([[Double]],[[Double]])
