@@ -329,7 +329,7 @@ main = do args <- getArgs
                                                 return (cachedBranchModelTree a,b)
          
           --manual control of threading
-          Sync.setNumCapabilities (numThreads)
+         -- Sync.setNumCapabilities (numThreads)
           let jobThreads=numThreads
           logger $ "Main model params " ++ (show params)
           let aX = map (fst . leftSplit) $ getAllF t2
@@ -345,13 +345,15 @@ main = do args <- getArgs
           let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT Nothing nProc nState a lM tree) (mapBack a) (getPriors tree)
           let stdGens = take numSim $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
-          let simulations s = case (optBoot,optMethod) of 
+          let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
+          let simulations' = case (optBoot,optMethod) of 
                                  (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ trees,alignments)
                                  (BranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (QuickBranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (NoOpt,_) -> (trees,alignments)
-                                 where (trees,alignments) = unzip $ map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) s
-          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+                                 where (trees,alignments) = (simTrees,simAlignments)
+          let simulations = (uncurry zip $ simulations') `using` parBuffer 1 rdeepseq
+          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
           --let simS = replicate numSim $ head $ map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
           let finishcalc tempdir = do 
                 logger tempdir
