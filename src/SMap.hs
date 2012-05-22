@@ -478,7 +478,7 @@ makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         
         pvalue = 1.0 - (cramerVonMises empQuantile simQuantile)
         lowerI = floor $ (fromIntegral simcount) * 0.025
-        upperI = ceiling ((fromIntegral simcount) * 0.975)
+        upperI = ceiling ((fromIntegral simcount) * 0.975) -1
         lower = map (UVec.! lowerI) simQuantile'
         upper = map (UVec.! upperI) simQuantile'
 
