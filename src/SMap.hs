@@ -54,7 +54,10 @@ import Control.Monad.ST (runST)
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
-data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String deriving Show
+data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String | JC deriving Show
+whatDataType x = case x of 
+                JC -> Nucleotide
+                _  -> AminoAcid
 
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
@@ -101,6 +104,7 @@ optSubR arg opt = do let model = case arg of
                                         "jtt,F" -> JTTF
                                         "wag" -> WAG
                                         "wag,F" -> WAGF
+                                        "jc" -> JC
                                         x | (isF x) -> CustomSF (reverse $ drop 2 $ reverse $ x)
                                           | otherwise -> CustomS x
                      return opt {optSub = model}  where
@@ -230,6 +234,7 @@ getSub model a = do let piF = fromList $ safeScaledAAFrequencies a
                                  WAG -> return (wagS,wagPi)
                                  JTT -> return (jttS,jttPi)
                                  JTTF -> return (jttS,piF)
+                                 JC -> return (jcS,jcPi)
                                  CustomS x -> parsePamlDatIO x
                                  CustomSF x -> do (s,pi) <- parsePamlDatIO x
                                                   return (s,piF)
@@ -254,6 +259,7 @@ main = do args <- getArgs
                   optJobName = jobName,
                   optThreads = numThreads
           } = opts
+          let dataType = whatDataType subModel
           let prefix = case jobName of
                 Nothing -> error "Please set a job name with -j"
                 Just a -> a
@@ -298,13 +304,13 @@ main = do args <- getArgs
                                            Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
                                            Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
           let (t2',priors,nClasses) = case modelParams of 
-                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
-                                           Ras _ -> (addModelFx (structDataN 1 AminoAcid (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
+                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
+                                           Ras _ -> (addModelFx (structDataN 1 dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
           case simulateOnly of 
                         Just alnLength -> do let emptyAlignment = quickListAlignment (Phylo.Tree.names t) [] 
                                              let emptyTree= case modelParams of 
-                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) AminoAcid (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
-                                                                   Ras a      -> addModelFx (structDataN 1 AminoAcid (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
+                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
+                                                                   Ras a      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
                                              mapM putStr $ toFasta $ makeSimulatedAlignment stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
@@ -345,7 +351,7 @@ main = do args <- getArgs
           let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT Nothing nProc nState a lM tree) (mapBack a) (getPriors tree)
           let stdGens = take numSim $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
-          let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) priors x AminoAcid nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
+          let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) priors x dataType nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
           let simulations' = case (optBoot,optMethod) of 
                                  (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ trees,alignments)
                                  (BranchOpt,_) -> (map optBLDFull0 trees,alignments)

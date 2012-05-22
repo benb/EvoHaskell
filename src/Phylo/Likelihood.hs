@@ -4,7 +4,8 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        ,mapBack,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
-       ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma) where
+       ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
+       ,jcS,jcPi) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -298,7 +299,7 @@ addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myP
                                   right= addModelNNode c3 model priors pi
                                   myPL = calcRootPL left middle right
 
-data SeqDataType = AminoAcid | Nucleotide
+data SeqDataType = AminoAcid | Nucleotide deriving Show
 getPartial :: Int -> SeqDataType -> String -> Matrix Double
 getPartial a b c = trans $ fromRows $ getPartial' a b c
 getPartial' :: Int -> SeqDataType -> String -> [Vector Double]
@@ -1085,4 +1086,7 @@ calcSwitchBL priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors
 switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
 
                                                                                 
-
+jcS :: Matrix Double
+jcS = (4><4) $ repeat 1.0
+jcPi :: Vector Double
+jcPi = fromList $ replicate 4 0.25
