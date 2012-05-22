@@ -300,6 +300,9 @@ main = do args <- getArgs
           let pAln = pAlignment a
           hSetBuffering stdout NoBuffering
           (sMat,pi) <- getSub subModel a 
+          print sMat
+          print pi
+          print $ makeQ sMat pi
           let (modelF,initparams,qsetF,optF) = case modelParams of 
                                            Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
                                            Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
@@ -311,7 +314,7 @@ main = do args <- getArgs
                                              let emptyTree= case modelParams of 
                                                                    Thmm a b c -> addModelFx (structDataN (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
                                                                    Ras a      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
-                                             mapM putStr $ toFasta $ makeSimulatedAlignment stdGen (cachedBranchModelTree emptyTree) alnLength 
+                                             mapM putStr $ toFasta $ makeSimulatedAlignment dataType stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
           let nState = nClasses * 20
@@ -664,7 +667,7 @@ optThmmModel method numModels cats pi s cutoff t2 params = optBSParamsBL cutoff 
         myModel = thmmModel (cats+1) s pi
 
 newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN classes dataType (pAln) origTree) model priors,pAln) where
-        aln = makeSimulatedAlignmentWithGaps stdGen tree origAln
+        aln = makeSimulatedAlignmentWithGaps dataType stdGen tree origAln
         pAln = pAlignment aln
 
 

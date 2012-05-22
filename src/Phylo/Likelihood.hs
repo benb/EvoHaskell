@@ -43,6 +43,9 @@ mytrace x y = y
 
 mytraceShow = mytrace . show
 
+dataSize AminoAcid = 20
+dataSize Nucleotide = 4
+
 
 -- |Combine two sets of partial likelihoods along two branches
 combinePartial :: Matrix Double -> Matrix Double -> Matrix Double
@@ -300,17 +303,36 @@ addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myP
                                   myPL = calcRootPL left middle right
 
 data SeqDataType = AminoAcid | Nucleotide deriving Show
+-- produce the partial likelihood at the tips
+-- getPartial numHiddenStates dataType Sequence
 getPartial :: Int -> SeqDataType -> String -> Matrix Double
 getPartial a b c = trans $ fromRows $ getPartial' a b c
 getPartial' :: Int -> SeqDataType -> String -> [Vector Double]
 getPartial' _ _ [] = []
 getPartial' classes AminoAcid (x:xs) = (aaPartial classes x):(getPartial' classes AminoAcid xs)
-getPartial' classes Nucleotide (x:xs) = error "Nucleotides unimplemented"
+getPartial' classes Nucleotide (x:xs) = (nucPartial classes x):(getPartial' classes Nucleotide xs)
+
+numberedHash list = foldr (\(item,i) init -> HM.insert item i init) HM.empty $ zip list [0..]
+
+myOrderVec Nucleotide = nucOrderVec
+myOrderVec AminoAcid = aaOrderVec
+
+nucOrder = ['T','C','A','G'] --as PAML
+nucOrderVec = DVec.fromList nucOrder
+nucOrderHash = numberedHash nucOrder
+
+nucPartial classes x | isGapChar x = buildVector (4*classes) (\i->1.0)
+                     | otherwise = case HM.lookup x nucOrderHash of 
+                                        Just index -> buildVector (4*classes) (\i -> if i`mod`4==index then 1.0 else 0.0)
+                                        Nothing -> error $ "character " ++ [x] ++ " is not a nucleotide or gap"
+
+
 
 aaOrder = ['A','R','N','D','C','Q','E','G','H','I','L','K','M','F','P','S','T','W','Y','V']
 aaOrderVec = DVec.fromList aaOrder
+aaOrderHash = numberedHash aaOrder
 aaPartial classes x | isGapChar x = buildVector (20*classes) (\i->1.0) 
-                    | otherwise = case findIndex (==x) aaOrder of 
+                    | otherwise = case HM.lookup x aaOrderHash of 
                                        Just index -> buildVector (20*classes) (\i -> if i`mod`20==index then 1.0 else 0.0) where
                                        Nothing -> error $ "character " ++ [x] ++ " is not an amino acid or gap"
 
@@ -964,8 +986,10 @@ genList stdGen = first:remainder where
         remainder = genList next
 
 draw :: Matrix Double -> Int -> Double -> Int
+draw mat row prob | trace ((show mat) ++ "\n" ++ (show row) ++ "\n" ++ (show prob)) False = undefined
 draw mat row prob  =  draw' 0 mat row prob
 draw' :: Int -> Matrix Double -> Int -> Double -> Int
+draw' i mat row prob | trace ((show i) ++ " " ++  (show row) ++ " " ++ (show prob)) False = undefined
 draw' i mat row prob = case (prob - (mat @@> (row,i))) of 
                           x | x <= 0.0 -> i
                             | otherwise -> draw' (i+1) mat row x
@@ -975,9 +999,9 @@ drawVec' i vec prob = case (prob - vec @> i) of
                           x | x <= 0.0 -> i
                             | otherwise -> drawVec' (i+1) vec x
 
-makeSimulatedAlignment' stdGen t 0 = []
-makeSimulatedAlignment' stdGen t i = (column,stdGen') : (makeSimulatedAlignment' stdGen' t (i-1)) where
-        (column,stdGen') = makeSimulatedColumnX t stdGen
+makeSimulatedAlignment' dt stdGen t 0 = []
+makeSimulatedAlignment' dt stdGen t i = (column,stdGen') : (makeSimulatedAlignment' dt stdGen' t (i-1)) where
+        (column,stdGen') = makeSimulatedColumnX dt t stdGen
 
 overlayGaps from@(ListAlignment names seqs _) to@(ListAlignment names' seqs' _) = quickListAlignment sortedNames' sortedSeqs'' where
         sortedSeqs = snd $ unzip $ sortBy (comparing snd) $ zip names seqs
@@ -989,41 +1013,42 @@ overlayGaps from@(ListAlignment names seqs _) to@(ListAlignment names' seqs' _) 
                                              | otherwise -> y:(overlayGaps'' (xs,ys))
         overlayGaps'' _ = []
 
-makeSimulatedAlignmentWithGaps stdGen t oldAln@(ListAlignment n s c) = overlayGaps oldAln (makeSimulatedAlignment stdGen t (length $ c))
+makeSimulatedAlignmentWithGaps dt stdGen t oldAln@(ListAlignment n s c) = overlayGaps oldAln (makeSimulatedAlignment dt stdGen t (length $ c))
 
-makeSimulatedAlignment stdGen t i = quickListAlignment names seqs where
-        raw = makeSimulatedAlignment' stdGen t i
+makeSimulatedAlignment dt stdGen t i = quickListAlignment names seqs where
+        raw = makeSimulatedAlignment' dt stdGen t i
         columns = map fst raw
         names = map snd $ head columns
         seqs = transpose $ map (map fst) columns
 
 
-makeSimulatedColumn :: DNode -> StdGen -> Int -> Int -> ([(Char,String)],StdGen)
-makeSimulatedColumn (DLeaf name dist _ _ modelList _) gen myRow modelIndex = ans where
+makeSimulatedColumn :: SeqDataType -> DNode -> StdGen -> Int -> Int -> ([(Char,String)],StdGen)
+makeSimulatedColumn dt (DLeaf name dist _ _ modelList _) gen myRow modelIndex = ans where
         ans = ([(myBase,name)],gen')
         (rand,gen') = randomR (0.0,1.0) gen 
         pT = (fst $ (modelList !! modelIndex) dist)
-        myBase =  aaOrderVec ! ((draw pT myRow rand) `mod` 20)
+        orderVec = myOrderVec dt
+        myBase =  orderVec ! ((draw pT myRow rand) `mod` (dataSize dt))
 
-makeSimulatedColumn (DINode l r dist modelList _) gen myRow modelIndex = ans where
+makeSimulatedColumn dt (DINode l r dist modelList _) gen myRow modelIndex = ans where
         ans = (myBase,genR)
         (rand,gen') = randomR (0.0,1.0) gen
         pT = (fst $ (modelList !! modelIndex) dist)
         myRow' = draw pT myRow rand
-        (mybasesl,genL) = makeSimulatedColumn l gen' myRow' modelIndex
-        (mybasesr,genR) = makeSimulatedColumn r genL myRow' modelIndex
+        (mybasesl,genL) = makeSimulatedColumn dt l gen' myRow' modelIndex
+        (mybasesr,genR) = makeSimulatedColumn dt r genL myRow' modelIndex
         myBase = mybasesl ++ mybasesr
 
 
-makeSimulatedColumn (DTree l m r _ _ priors pis) gen myRow modelIndex = ans where
+makeSimulatedColumn dt (DTree l m r _ _ priors pis) gen myRow modelIndex = ans where
         ans = (myBase,genR)
-        (mybasesl,genL) = makeSimulatedColumn l gen myRow modelIndex
-        (mybasesm,genM) = makeSimulatedColumn m genL myRow modelIndex
-        (mybasesr,genR) = makeSimulatedColumn r genM myRow modelIndex
+        (mybasesl,genL) = makeSimulatedColumn dt l gen myRow modelIndex
+        (mybasesm,genM) = makeSimulatedColumn dt m genL myRow modelIndex
+        (mybasesr,genR) = makeSimulatedColumn dt r genM myRow modelIndex
         myBase = mybasesl ++ mybasesm ++ mybasesr
         
 
-makeSimulatedColumnX tree@(DTree l m r _ _ priors pis) gen = makeSimulatedColumn tree gen'' myRow modelIndex where
+makeSimulatedColumnX dt tree@(DTree l m r _ _ priors pis) gen = makeSimulatedColumn dt tree gen'' myRow modelIndex where
         (rand,gen') = randomR (0.0,1.0) gen
         (rand2,gen'') = randomR (0.0,1.0) gen'
         myRow = drawVec (pis !! modelIndex) rand
@@ -1059,34 +1084,35 @@ annotateTreeWith' mapping n@(DINode l r bl models mats) = DINode (an l) (an r) (
 
 annotateTreeWith' mapping n@(DLeaf name bl seq tip models partial) = DLeaf name (bl ++ [(mapping [name])]) seq tip models partial
 
-annotateTreeWithNumberSwitchesSigma sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
-                                                                            an = annotateTreeWithNumberSwitchesSigma' sigma priors pis
+annotateTreeWithNumberSwitchesSigma dt sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitchesSigma' dt sigma priors pis
 
-annotateTreeWithNumberSwitchesSigma' sigma priors pis (DINode l r (bl:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
-                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
-                                                                                        an = annotateTreeWithNumberSwitchesSigma' sigma priors pis
+annotateTreeWithNumberSwitchesSigma' dt sigma priors pis (DINode l r (bl:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitchesSigma' dt sigma priors pis
 
-annotateTreeWithNumberSwitchesSigma' sigma priors pis (DLeaf name (bl:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
-                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
+annotateTreeWithNumberSwitchesSigma' dt sigma priors pis (DLeaf name (bl:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
 
-annotateTreeWithNumberSwitches (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
-                                                                            an = annotateTreeWithNumberSwitches' priors pis
-annotateTreeWithNumberSwitches' priors pis (DINode l r (bl:sigma:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
-                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
-                                                                                        an = annotateTreeWithNumberSwitches' priors pis
+annotateTreeWithNumberSwitches dt (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitches' dt priors pis
+annotateTreeWithNumberSwitches' dt priors pis (DINode l r (bl:sigma:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitches' dt priors pis
 
-annotateTreeWithNumberSwitches' priors pis (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
-                                                                                        switchbl = calcSwitchBL priors pis models [bl,sigma]
+annotateTreeWithNumberSwitches' dt priors pis (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
 
 
-calcSwitchBL priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors switchingrates where
+calcSwitchBL dt priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors switchingrates where
                                                  mats = map (\x-> snd $ x [bl,sigma]) models
-                                                 switchingrates = map (switchingSum 20) $ zip pis mats --fix this magic number
+                                                 switchingrates = map (switchingSum (dataSize dt)) $ zip pis mats 
 
 switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
 
                                                                                 
 jcS :: Matrix Double
 jcS = (4><4) $ repeat 1.0
+
 jcPi :: Vector Double
 jcPi = fromList $ replicate 4 0.25

@@ -31,9 +31,10 @@ intraLMat size alphabet = toLists $ fromBlocks allSubmats where
                           invDiagMat = buildMatrix alphabet alphabet (\(i,j) -> if (i==j) then 0 else 1)
                           zeroMat = buildMatrix alphabet alphabet (\(i,j) -> 0)
                           allSubmats = map (\i -> (replicate i zeroMat) ++ (invDiagMat : (replicate (size - 1 - i) zeroMat))) [0..(size-1)]
+
 makeQ matS pi = runSTMatrix $ do 
                 let rawQ = matS <>(diag pi)
-                let rowTots = map (sumElements) $ toRows (rawQ)
+                let rowTots = map (\(row,ind) -> (sumElements row) - (rawQ @@> (ind,ind))) $ zip (toRows (rawQ)) [0..]
                 q <- thawMatrix rawQ
                 let normRow (i,tot) = writeMatrix q i i (-tot)
                 mapM_ (normRow) $ zip [0..(rows rawQ)-1] rowTots
