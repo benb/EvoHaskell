@@ -464,7 +464,7 @@ perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fr
 makeQQLine :: [[Double]] -> [Double] -> ([Double],[Double],[Double],Double) 
 makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
         simcount = length simulated
-        numQ = min (length $ head simulated) simcount
+        numQ = simcount
         f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / (fromIntegral simcount)
 
         fval x = timSort $ map f $ zip x (transpose simulated)
