@@ -3,7 +3,8 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        DNode(DLeaf,DINode,DTree),PatternAlignment(PatternAlignment),addModelFx,structDataN
        ,mapBack,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
-       ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList) where
+       ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
+       ,addModelNNode,removeModel) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -236,16 +237,20 @@ restructDataMapped leaf@(DLeaf name dist sequence partial _ _) model priors pi  
                                                                                myModel = model leaf
 
 restructDataMapped inode@(DINode left right dist _ _ ) model priors pi= DINode newleft newright dist myModel partial where
-                                                            partial = (getPL newleft) `par` (getPL newright) `pseq` calcPL newleft newright dist myModel
+                                                            partial = calcPL newleft newright dist myModel
                                                             myModel = model inode
                                                             newleft = restructDataMapped left model priors pi
                                                             newright = restructDataMapped right model priors pi
 
 restructDataMapped tree@(DTree left middle right _ pc _ _ ) model priors pi = DTree newleft newmiddle newright partial pc priors pi where 
-                                            partial = (getPL newleft) `par` (getPL newmiddle) `par` (getPL newright) `pseq` calcRootPL newleft newmiddle newright
+                                            partial = calcRootPL newleft newmiddle newright
                                             newleft = restructDataMapped left model priors pi
                                             newright = restructDataMapped right model priors pi
                                             newmiddle = restructDataMapped middle model priors pi  
+
+removeModel (DTree l m r _ pc _ _ )  = NTree (removeModel l) (removeModel m) (removeModel r) pc
+removeModel (DINode l r d _ _ ) = NINode (removeModel l) (removeModel r) d
+removeModel (DLeaf name dist seq partial _ _) = NLeaf name dist seq partial
 
 
 
@@ -390,6 +395,11 @@ instance NFData DNode where
         rnf (DTree l m r mats ints doubles vectors) = rnf l `seq` rnf m `seq` rnf r `seq` rnf (map toLists mats) `seq` rnf ints `seq` rnf doubles `seq` rnf (map toList vectors) `seq` ()
         rnf (DINode l r doubles models mats) = rnf l `seq` rnf r `seq` rnf doubles `seq` rnf models `seq` rnf (map toLists mats) `seq` ()
         rnf (DLeaf string doubles s2 mat bms mats) = rnf string `seq` rnf doubles `seq` rnf s2 `seq` rnf (toLists mat) `seq` rnf bms `seq` rnf (map toLists mats) `seq` ()
+
+instance NFData NNode where
+        rnf (NLeaf s d s2 mat) = rnf s `seq` rnf d `seq` rnf s2 `seq` rnf (toLists mat)
+        rnf (NINode l r bl) = rnf l `seq` rnf r `seq` rnf bl
+        rnf (NTree l m r i) = rnf l `seq` rnf m `seq` rnf r `seq` rnf i
 
 instance NFData PatternAlignment where
         rnf (PatternAlignment n s c pats counts) = rnf n `seq` rnf s `seq` rnf pats `seq` rnf c `seq` rnf counts
