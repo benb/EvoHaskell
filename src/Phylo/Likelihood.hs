@@ -4,7 +4,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        ,mapBack,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
-       ,addModelNNode,removeModel) where
+       ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -569,9 +569,9 @@ optLeftBL tree  = setLeftBL tree best where
 getLeftBL (DTree (DINode _ _ x _ _) _ _ _ _ _ _) = x
 getLeftBL (DTree (DLeaf _ x _ _ _ _) _ _ _ _ _ _) = x
 #ifdef Debug
-sensibleBrent tol ftol f hardL hardU startB startF = mytrace  ("BRENT " ++ (show boundL') ++ " " ++ (show boundU') ++ " " ++ (show startB')) $ brent tol ftol f boundL' boundU' startB' fBoundL' fBoundU' startF' where
+sensibleBrent tol ftol f hardL hardU startB startF = mytrace  ("BRENT " ++ (show boundL') ++ " " ++ (show boundU') ++ " " ++ (show startB')) $ brent tol ftol f boundL boundU startB' fBoundL fBoundU startF' where
 #else
-sensibleBrent tol ftol f hardL hardU startB startF = brent tol ftol f boundL' boundU' startB' fBoundL' fBoundU' startF' where
+sensibleBrent tol ftol f hardL hardU startB startF = brent tol ftol f boundL boundU startB' fBoundL fBoundU startF' where
 #endif
         boundL' = max hardL (startB/2)
         boundU' = case min hardU (startB*2) of
@@ -739,7 +739,6 @@ thmm :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double ->
 thmm numCat pi s priors alpha sigma = (\x->(standardpT eigM x,mat)) where
                                                eigM = eigQ mat fullPi
                                                mat = thmmQ numCat pi s priors alpha sigma
-                                               --mat2 = thmmQ2 numCat pi s priors alpha sigma
                                                fullPi = makeFullPi priors pi
 
 
@@ -752,26 +751,7 @@ thmmQ numCat pi s priors alpha sigma = (matDr `kronecker` matM) `add` (matG `kro
                                         factor = 1.0 / (1.0 - (last priors))                                                                                                                                                                  
                                         matG = makeQ sigmaMat $ fromList priors
                                         sigmaMat = diagRect sigma (fromList $ replicate numCat 0.0) numCat numCat 
-                                        matIm = diag pi --ident size
-                                        size = cols s
-                                        --(lambdaQ,rEigQ) = eigS matM
-                                        --e = map (\lambda -> eigS (matG + (scale lambda matDr))) $ toList lambdaQ
-                                        --kroneckerVec a b = head $ toLists $ kronecker (asRow a) (asRow b)
-                                        --e2f (a,b) c = map (\(x,y) -> (x,y `kroneckerVec` c)) $ zip3 (toList a, rows b)
-
-
-
-thmmQ2 :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> Double -> Matrix Double
-thmmQ2 numCat pi s priors alpha sigma = fixDiag $ fromBlocks subMats where 
-                                        subMats = map (\(i,mat) -> getRow i mat) $ zip [0..] qMats 
-                                        qMats = (map (\(i,mat) -> setRate i mat pi) $ zip (map (*factor) $ gamma (numCat -1) alpha) $ replicate numCat $ makeQ s pi) ++ [(zeroQMat (rows s))]
-                                        factor = 1.0 / (1.0 - (last priors))
-                                        getRow i mat = map (kk' mat i) [0..(numCat-1)] 
-                                        size = cols s
-                                        kk' mat i j | i==j = mat
-                                                    | otherwise = diagRect 0.0 (mapVector ((priors !! j) * sigma * ) pi) size size
-
-
+                                        matIm = diag pi 
 
 thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> (Matrix Double,Matrix Double)
 thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s priors alpha sigma [branchLength]
@@ -790,27 +770,8 @@ loggedFunc f | mytrace "LOGGING ON" True = f2 where
                     
 maximize method pre maxiter size f = minimize method pre maxiter size (invert f) 
 
-maximizeDG lower upper method pre maxiter size tol f params = minimizeD method pre maxiter size tol f2 (mygrad lower upper f2) params where
-        f2 = invert f
-
 stepSize = 1E-4
 
-mygrad lower upper f params = mygrad' [] lower upper f params
-mygrad' donep (l:lower) (u:upper) f (p:ps) = ans:(mygrad' (p:donep) lower upper f ps) where 
-        f2 x = f $ (reverse (x:donep)) ++ ps
-        ans = case (l,u) of 
-                (Nothing,Nothing) -> fst $ derivCentral stepSize f2 p 
-                (Just x,Nothing) -> fst $ derivForward stepSize f2 p
-                (Nothing,Just x) -> fst $ derivBackward stepSize f2 p
-                (Just li,Just ui) | (p + stepSize > ui) -> fst $ derivBackward stepSize f2 p
-                (Just li,Just ui) -> fst $ derivForward stepSize f2 p
-mygrad' _ _ _ _ [] = []
-
-
-
-
-
-optBL :: (AddTree t) => ModelF -> t -> [Double] -> [Double] -> Double -> DNode
 optBL model t' params priors cutoff = mytraceShow optTree optTree where
         tree  = addModelFx t' (model params) priors
         optTree = optBLD $ optBLD tree
@@ -820,10 +781,6 @@ optBLx val model t' params priors cutoff = mytraceShow optTree optTree where
                 tree  = addModelFx t' (model params) priors
                 optTree = optBLD $ optBLD tree
  
-genericOpt opt maxiter size precision lower upper func initialParams = fst $ maximize opt precision maxiter size (boundedFunction (-1E20) lower upper func) initialParams
-simplexOpt :: [Maybe Double] -> [Maybe Double] -> ([Double] -> Double) -> [Double] -> [Double]
-simplexOpt l u f p = genericOpt NMSimplex2 100000 (map (\x->0.1) p) 1e-4 l u f p
-bfgsOpt l u f p = fst $ maximizeDG l u VectorBFGS2 1e-4 100000 0.1 1e-4 f p 
 
 getSingleDimensional :: ([Double]->a) -> [Double] -> [Double->a]
 getSingleDimensional f x = map (\i x2 -> f (replace i [x2] x)) $ map fst $ zip [0..] x
@@ -854,7 +811,7 @@ getFuncT1A' priors mapping (paramsPerBranch,paramCats) model tree params = newtr
         params' = drop (paramsPerBranch * paramCats) params
         getParamF node = (perBranchParams !! (mapping node))
 
-getParamsT1 params tree = params
+--getParamsT1 params tree = params
 
 -- branchLengths, then other parameters
 getFuncT2 :: [Double] -> ModelF -> DNode -> [Double] -> (DNode,[Double->DNode])
@@ -867,7 +824,7 @@ getFuncT2 priors model tree params = (newtree,funcs) where
         rootedTrees = getAllF t2
         funcsPerBranch = map setLeftBL0 rootedTrees
 
-getParamsT2 params tree = (map head $ getBL' tree []) ++  params
+--getParamsT2 params tree = (map head $ getBL' tree []) ++  params
 
 -- branchLengths, then bsParams, then other params
 getFuncT3 priors mapping (0,_) model tree params = getFuncT2 priors model tree params
@@ -879,7 +836,7 @@ getFuncT3 priors mapping numBSParam model tree params | mytrace ("getFuncT3 " ++
         rootedTrees = getAllF newtree
         
 
-getParamsT3 = getParamsT2 
+--getParamsT3 = getParamsT2 
 
 
 splitLists i [] = []
@@ -888,7 +845,6 @@ splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
 
 --optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-2 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
 optBSParamsBL cutoff method numBSParam mapping initialStepSize = optWithBSIO' method [] cutoff numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
-optDefault = optBSParamsBL 1E-2
 
 getDeriv (curr,f,x,l,u) = getDeriv' 1E-6 curr f x l u
 
@@ -919,7 +875,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 list@((x,BL):[]) -> (tree',bestParams',Params) : optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where
                                 --initial param opt, use big steps
-                                (bestParams',err) = bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
+                                (bestParams',_) = bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
@@ -946,7 +902,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 stepSize' = (map (*0.1) myBL)  ++ (map (/2) stepSize)
                            {-let startParams' = enforceBounds lower' upper' (addBL startParams)-}
                                 startParams' = addBL startParams
-                                (bestParams',err) = method stepSize' 1E-3 startParams' f lower' upper' --f startParams'
+                                (bestParams',_) = method stepSize' 1E-3 startParams' f lower' upper' --f startParams'
                             --let (bestParams',err) = output
                                 (tree',_) = getFuncT3 priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
@@ -971,9 +927,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 tree' = optBLDFull0 startTree                                       
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
-     incrementStepSize ss = map (\(x,y) -> max x y) $ zip limitStepSize $ map (/10) ss
-     stepSizeMet = stepSizeMet' limitStepSize stepSize
-     stepSizeMet' a b = (Nothing /=) $ find (\(x,y)-> (<) x y) $ zip a b
+     --incrementStepSize ss = map (\(x,y) -> max x y) $ zip limitStepSize $ map (/10) ss
      
 
  
@@ -988,8 +942,6 @@ enforceBounds l u p = enforce (>) u $ enforce (<) l p where
 --TODO eradicate this function!
 dummyTree :: (AddTree t) => t -> DNode 
 dummyTree t = addModelFx t (basicModel wagS wagPi []) [1.0]
-
-whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
 
 makeMapping :: (AddTree t) => (([String],[String]) -> a) -> t -> (DNode -> a) 
 makeMapping splitmap t = lookupF where
@@ -1076,49 +1028,6 @@ makeSimulatedColumnX tree@(DTree l m r _ _ priors pis) gen = makeSimulatedColumn
         myRow = drawVec (pis !! modelIndex) rand
         modelIndex = drawFromDist priors rand2 
 
-makeSimulatedTree = makeSimulatedTreeX True
-
-makeSimulatedTreeX withGaps seqDataType hiddenClasses stdGen len (DTree l m r _ pC priors pis) = DTree left middle right pLs (replicate len 1) priors pis where
-        left = makeSimulatedTree' pC withGaps seqDataType hiddenClasses leftR topSeq models l
-        middle = makeSimulatedTree' pC withGaps seqDataType hiddenClasses middleR topSeq models m
-        right  = makeSimulatedTree' pC withGaps seqDataType hiddenClasses rightR topSeq models r
-        pLs = calcRootPL left middle right
-        (r0:r1:leftR:middleR:rightR:remainder) = genList stdGen
-        models = take len $ map (drawFromDist priors) $ randomRs (0.0,1.0) r0
-        drawLetters :: [Int]
-        drawLetters  = map (\(p,pri) -> drawFromDist pri p) $ zip (randomRs (0.0,1.0) r1) $ map toList $ map (pis!!) models
-        topSeq :: [Int]
-        topSeq = take len drawLetters 
-
---makeSimulatedTree' :: Bool -> SeqDataType -> Int -> StdGen -> [Int] -> [Int] -> DNode -> DNode
-makeSimulatedTree' pC withGaps Nucleotide _ _ _ _ _ = error "Nucleotide simulation unimplemented"
-
-makeSimulatedTree' pC withGaps AminoAcid hiddenClasses stdGen topSeq models (DLeaf name dist oldSeq _ modelList _) = DLeaf name dist bottomSeq tipLkl modelList pLs where
-        myMats = DVec.fromList $ map DVec.fromList $ map toLists $ map (\x -> fst $x dist) modelList
-        myVectors :: [DVec.Vector [Double]]
-        myVectors = map (myMats!) models
-        myVectors' = (map (\(vec,base) -> vec!base) $ zip myVectors topSeq)
-        bottomSeq'= map (aaOrderVec!) $ map (`mod` 20 ) $ map (\(p,pris) -> drawFromDist pris p) $ zip (randomRs (0.0,1.0) stdGen) myVectors'
-        bottomSeq = map overlay $ zip bottomSeq' oldSeq'
-        oldSeq' = concatMap (\(c,p) -> replicate c p) $ zip pC oldSeq
-        overlay (x,y) = case (withGaps,x,y) of 
-                          (True,_,'-') -> '-'
-                          (_,a,_)      -> a
-        pLs = calcLeafPL tipLkl dist modelList
-        tipLkl = getPartial hiddenClasses AminoAcid bottomSeq
-
-makeSimulatedTree' pC withGaps seqDataType hiddenClasses stdGen topSeq models (DINode l r dist modelList _)  = DINode left right dist modelList pLs where
-        myMats = DVec.fromList $ map (DVec.fromList . toLists) $ map (\x -> fst$ x dist) modelList
-        myVectors :: [DVec.Vector [Double]]
-        myVectors = map (myMats!) models
-        (r0:leftR:rightR:_) = genList stdGen 
-        bottomSeqPartial :: [(Double,[Double])]
-        bottomSeqPartial = zip (randomRs (0.0,1.0) r0) (map (\(vec,base) -> vec!base) $ zip myVectors topSeq) 
-        bottomSeq = map (\(p,pris) -> drawFromDist pris p) bottomSeqPartial
-        left = makeSimulatedTree' pC withGaps seqDataType hiddenClasses leftR bottomSeq models l
-        right = makeSimulatedTree' pC withGaps seqDataType hiddenClasses rightR bottomSeq models r
-        pLs = calcPL left right dist modelList
-
 drawFromDist pris = drawFromDist' $ map nonNeg pris where
         nonNeg x | x < 0.0 = 0.0
         nonNeg x = x
@@ -1132,16 +1041,6 @@ drawFromDist' pris = drawFromDist'' 0 pris
 drawFromDist'' :: Int -> [Double] -> Double -> Int
 --drawFromDist' c pris p | trace ((show c) ++ " " ++ (show pris) ++ " " ++ (show p)) False = undefined
 drawFromDist'' c (pri:pris) p = if (p <= pri) then c else (drawFromDist'' (c+1) pris (p-pri))
-
-simulateSequences seqDataType hiddenClasses stdGen len root = getAln simTree where 
-        simTree  = makeSimulatedTree seqDataType hiddenClasses stdGen len root
-
-getAln tree@(DTree _ _ _ _ pC _ _) = quickListAlignment names seqs where
-        leaves = getLeaves tree
-        names = map dName leaves
-        seqs' = map Phylo.Likelihood.sequence leaves
-        seqs = map (concatMap (\(c,p) -> replicate c p)) $ map (zip pC) seqs'
-        
 
 
 annotateTreeWith :: [(([String],[String]),Double)] -> DNode -> DNode 
