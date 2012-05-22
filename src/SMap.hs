@@ -303,6 +303,7 @@ main = do args <- getArgs
           print sMat
           print pi
           print $ makeQ sMat pi
+          let alphabetSize = dataSize dataType
           let (modelF,initparams,qsetF,optF) = case modelParams of 
                                            Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
                                            Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
@@ -317,7 +318,7 @@ main = do args <- getArgs
                                              mapM putStr $ toFasta $ makeSimulatedAlignment dataType stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
-          let nState = nClasses * 20
+          let nState = nClasses * alphabetSize
           let tol = case optBoot of
                            (FullOpt level) -> min level 1E-2
                            _               -> 1E-2
@@ -362,8 +363,7 @@ main = do args <- getArgs
                                  (NoOpt,_) -> (trees,alignments)
                                  where (trees,alignments) = (simTrees,simAlignments)
           let simulations = (uncurry zip $ simulations') `using` parBuffer 1 rdeepseq
-          let simS = map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) simulations
-          --let simS = replicate numSim $ head $ map (dualStochMap stochmapTTA (interLMat nClasses 20) (intraLMat nClasses 20)) ((uncurry zip) $ simulations stdGens)
+          let simS = map (dualStochMap stochmapTTA (interLMat nClasses alphabetSize) (intraLMat nClasses alphabetSize)) simulations
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
@@ -410,7 +410,7 @@ main = do args <- getArgs
                                  putMVar m1 ()
                                  writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
                                  putMVar m1 ()
-                let ansIntra = stochmapTTA (intraLMat nClasses 20) t2 pAln
+                let ansIntra = stochmapTTA (intraLMat nClasses alphabetSize) t2 pAln
                 m1<-newEmptyMVar
                 forkIO $ outputMat (prefix++"-subs",snd,m1,ansIntra)
                 let prog mVar y x = do 
@@ -421,7 +421,7 @@ main = do args <- getArgs
                    then do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
                    else do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 10
-                           forkIO $ outputMat (prefix++"-switch",fst,m1,stochmapTTA (interLMat nClasses 20) t2 pAln)
+                           forkIO $ outputMat (prefix++"-switch",fst,m1,stochmapTTA (interLMat nClasses alphabetSize) t2 pAln)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
                 putStrLn " done"
@@ -563,7 +563,9 @@ getCols (PatternAlignment _ _ c _ _) = c
 normalise list = map ( / total) list where     
                  total = foldr (+) 0.0 list
 
-safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
+safeScaledFrequencies f = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . f
+safeScaledAAFrequencies = safeScaledFrequencies scaledAAFrequencies
+safeScaledNucFrequencies = safeScaledFrequencies $ scaledFrequencies "TCAG"
 
 trim = f . f where 
    f = reverse . dropWhile isSpace
@@ -623,21 +625,11 @@ qList qFunc numQ = map (\x-> qFunc x numQ) [0..numQ]
 --                      partialFunc q k | trace ("Made vec " ++ (show vec)) True = continuousBy medianUnbiased q k vec
 --                      vec | trace ("Making vector " ++ (take 10 $ show simData)) True = (UVec.fromList $ concatMap allDisc simData)
 
-linearFromRaw mapping priors ans | trace "linearFromRaw" True = linearAns $ stochmapOrder ans mapping priors
-linearAns reformattedAns = allDisc reformattedAns
 reformatAns mapping priors stochResult = (map $ uncurry3 stochmapOrder) $ zip3 stochResult mapping priors
 --uniformQRaw mapping priors stochResult = uniformQ $ reformatAns mapping priors stochResult
 
 uncurry3 f (a,b,c) = f a b c 
 
-allDisc :: ([[Double]],[Double]) -> [Double]
-allDisc a | trace ("allDisc" ++ (take 20 $ show a)) False = undefined
-allDisc (condE:xs,priorE:ys) | traceShow ("len " ++ (show $ 1 + (length xs)) ++ " " ++ (show $ 1 + (length ys))) True = (allDisc' condE priorE) ++ (allDisc (xs,ys))
-allDisc ([],[]) = []
-allDisc (c,p) | traceShow (c,p) True = undefined
---allDisc' condE priorE | trace ("prior cond " ++ (show priorE) ++ "  " ++ (show condE)) False = undefined
-allDisc' condE priorE  = map (\x -> priorE - x) condE
-                                        
 allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of                                                                                                                                                         
                                         Just a -> a                                                                                                                                                                                           
                                         Nothing -> other                                                                                                                                                                                      

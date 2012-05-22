@@ -5,7 +5,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
-       ,jcS,jcPi) where
+       ,jcS,jcPi,dataSize) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -34,6 +34,9 @@ import Control.Parallel.Strategies
 import Control.DeepSeq
 import Data.Ord
 import qualified Data.HashMap as HM
+import Control.Monad.ST
+import Control.Monad
+import Data.Packed.ST
 
 #ifdef Debug
 mytrace = trace
@@ -986,10 +989,10 @@ genList stdGen = first:remainder where
         remainder = genList next
 
 draw :: Matrix Double -> Int -> Double -> Int
-draw mat row prob | trace ((show mat) ++ "\n" ++ (show row) ++ "\n" ++ (show prob)) False = undefined
+--draw mat row prob | trace ((show mat) ++ "\n" ++ (show row) ++ "\n" ++ (show prob)) False = undefined
 draw mat row prob  =  draw' 0 mat row prob
 draw' :: Int -> Matrix Double -> Int -> Double -> Int
-draw' i mat row prob | trace ((show i) ++ " " ++  (show row) ++ " " ++ (show prob)) False = undefined
+--draw' i mat row prob | trace ((show i) ++ " " ++  (show row) ++ " " ++ (show prob)) False = undefined
 draw' i mat row prob = case (prob - (mat @@> (row,i))) of 
                           x | x <= 0.0 -> i
                             | otherwise -> draw' (i+1) mat row x
@@ -1112,7 +1115,11 @@ switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
 
                                                                                 
 jcS :: Matrix Double
-jcS = (4><4) $ repeat 1.0
+jcS = runST $ do 
+        s <- thawMatrix $ (4><4) $ repeat 1.0
+        forM_ [0..3] (\i-> writeMatrix s i i 0.0) 
+        freezeMatrix s
 
 jcPi :: Vector Double
 jcPi = fromList $ replicate 4 0.25
+
