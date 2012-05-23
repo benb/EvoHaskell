@@ -54,7 +54,7 @@ import Control.Monad.ST (runST)
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
-data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String | JC deriving Show
+data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String | JC | GTR | GTRF deriving Show
 whatDataType x = case x of 
                 JC -> Nucleotide
                 _  -> AminoAcid
@@ -105,6 +105,8 @@ optSubR arg opt = do let model = case arg of
                                         "wag" -> WAG
                                         "wag,F" -> WAGF
                                         "jc" -> JC
+                                        "gtr" -> GTR
+                                        "gtr,F" -> GTRF
                                         x | (isF x) -> CustomSF (reverse $ drop 2 $ reverse $ x)
                                           | otherwise -> CustomS x
                      return opt {optSub = model}  where
@@ -228,16 +230,21 @@ getNiceOpt2 len (a,b,c) (a',b',c') = outL ++ outR where
                                         outR = replicate (len - (length outL)) ' '
 
 
+getSub :: SubModel -> ListAlignment -> IO SPiFunctionTuple
 getSub model a = do let piF = fromList $ safeScaledAAFrequencies a
+                    let nucPiF = fromList $ safeScaledNucFrequencies a
                     case model of 
-                                 WAGF -> return (wagS,piF)
-                                 WAG -> return (wagS,wagPi)
-                                 JTT -> return (jttS,jttPi)
-                                 JTTF -> return (jttS,piF)
-                                 JC -> return (jcS,jcPi)
-                                 CustomS x -> parsePamlDatIO x
+                                 WAGF -> return $ customF wagS piF
+                                 WAG -> return wagF
+                                 JTT -> return jttF
+                                 JTTF -> return $ customF jttS piF
+                                 JC -> return jcF
+                                 GTRF -> return $ (fst gtrF,zeroParam nucPiF)
+                                 GTR -> return gtrF
+                                 CustomS x -> do (s,pi) <- parsePamlDatIO x
+                                                 return $ customF s pi
                                  CustomSF x -> do (s,pi) <- parsePamlDatIO x
-                                                  return (s,piF)
+                                                  return $ customF s piF
 
 main = do args <- getArgs
           let ( actions, nonOpts, msgs ) = getOpt Permute options args
@@ -299,14 +306,17 @@ main = do args <- getArgs
                    _             -> var2
           let pAln = pAlignment a
           hSetBuffering stdout NoBuffering
-          (sMat,pi) <- getSub subModel a 
-          print sMat
-          print pi
-          print $ makeQ sMat pi
+          (sMatAll,piAll) <- getSub subModel a 
+          let ((sMatF,sMatP,sMatL,sMatU),(piF,piP,piL,piU)) = (sMatAll,piAll)
+          let extraLowerParams = sMatL++piL
+          let extraUpperParams = sMatU++piU
+          let sMat = (sMatF,sMatP)
+          let pi = (piF,piP)
+          let extraParams :: [Double] = ((getSensibleParams sMatAll)  ++ (getSensibleParams piAll))
           let alphabetSize = dataSize dataType
           let (modelF,initparams,qsetF,optF) = case modelParams of 
-                                           Thmm a b c -> (thmmModel (cats+1) sMat pi,[a,b,c],(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat)
-                                           Ras a -> (gammaModel cats sMat pi,[a],(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat )
+                                           Ras a -> (gammaModel cats sMat pi,(a:extraParams),(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat extraLowerParams extraUpperParams)
+                                           Thmm a b c -> (thmmModel (cats+1) sMat pi,(a:b:c:extraParams),(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat extraLowerParams extraUpperParams)
           let (t2',priors,nClasses) = case modelParams of 
                                            Thmm _ _ _ -> (addModelFx (structDataN (cats+1) dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
                                            Ras _ -> (addModelFx (structDataN 1 dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
@@ -650,12 +660,12 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
-optGammaModel method cats pi s cutoff = optBSParamsBL cutoff method (0,0) (\x->0) [0.1] [Just 0.01] [Just 100.0] (flatPriors cats) model where                                                           
+optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) [0.1] ((Just 0.01):lower) ((Just 100.0):upper) (flatPriors cats) model where                                                           
         model = gammaModel cats s pi
                                 
-optThmmModel method numModels cats pi s cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
-        lower = [Just 0.01,Just 0.1,Just 0.01]                                                                                                           
-        upper = [Just 0.99,Just 200.0,Just 500.0]                                                                                                                  
+optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
+        lower = [Just 0.01,Just 0.1,Just 0.01] ++ lower'                                                                                                       
+        upper = [Just 0.99,Just 200.0,Just 500.0] ++ upper'                                                                                                           
         myModel = thmmModel (cats+1) s pi
 
 newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN classes dataType (pAln) origTree) model priors,pAln) where

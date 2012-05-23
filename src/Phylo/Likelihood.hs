@@ -5,7 +5,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
-       ,jcS,jcPi,dataSize) where
+       ,jcF,gtrF,gtrS,wagF,jttF,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -736,22 +736,32 @@ basicModel s pi _ = ([model],[pi]) where
 quickLkl aln tree pi s = qdLkl 1 [1.0] AminoAcid aln tree (basicModel s pi) []
 quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid aln tree (gammaModel numCat s pi) [alpha]
 
-gammaModel numCat s pi (alpha:xs) = (models,replicate numCat pi) where
+gammaModel numCat (sF,sN) (piF,piN) (alpha:xs) = (models,replicate numCat pi) where
                                 models = map (\r -> (\x ->(scaledpT r eigenS x,mat))) $ gamma numCat alpha
                                 (eigenS,mat) = quickEigen' pi s
-gammaModelQ numCat s pi (alpha:xs) = map (\r -> setRate r initMat pi) $ gamma numCat alpha where
+                                s = sF (take sN xs)
+                                pi = piF (take piN (drop sN xs))
+
+gammaModelQ numCat (sF,sN) (piF,piN) (alpha:xs) = map (\r -> setRate r initMat pi) $ gamma numCat alpha where
                                 initMat = makeQ s pi
+                                s = sF (take sN xs)
+                                pi = piF (take piN (drop sN xs))
                                 
 
 
-thmmModel numCat s pi [priorZero,alpha,sigma] = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
-                        priors =  (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
-                        fullPi = makeFullPi priors pi
+thmmModel :: Int -> ([Double]->Matrix Double,Int) -> ([Double] -> Vector Double,Int) -> [Double] -> ([BranchModel],[Vector Double])
+thmmModel numCat (sF,sN) (piF,piN) (priorZero:alpha:sigma:xs) = ([thmm numCat pi s priors alpha sigma],[fullPi]) where
+                               priors =  (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
+                               s = sF (take sN xs)
+                               pi = piF (take piN (drop sN xs))
+                               fullPi = makeFullPi priors pi
 
 {-- TODO refactor this out --}
-thmmModelQ numCat s pi [priorZero,alpha,sigma] = (thmmQ numCat pi s priors alpha sigma) where
-                        priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
-                        fullPi = makeFullPi priors pi
+thmmModelQ numCat (sF,sN) (piF,piN) (priorZero:alpha:sigma:xs) = (thmmQ numCat pi s priors alpha sigma) where
+                                   priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
+                                   fullPi = makeFullPi priors pi
+                                   s = sF (take sN xs)
+                                   pi = piF (take piN (drop sN xs))
 
 
 thmmPerBranchModel numCat s pi [priorZero,alpha] = ([thmmPerBranch numCat pi s priors alpha],[fullPi]) where 
@@ -1123,3 +1133,35 @@ jcS = runST $ do
 jcPi :: Vector Double
 jcPi = fromList $ replicate 4 0.25
 
+jcF = customF jcS jcPi
+
+zeroParam v = (\x -> v,0,[],[])
+
+gtrS :: [Double] -> Matrix Double
+gtrS [a,b,c,d,e] = (4><4) [0,a,b,c,a,0,d,e,b,d,0,1,c,e,1,0] 
+gtrPi :: [Double] -> Vector Double
+gtrPi = piByLog
+
+piByLog xs = fromList $ normaliseL (1.0:(map exp xs))
+logByPi (first:xs) = let mlnFirst = -(log first) in
+                        map (+mlnFirst) $ map log xs
+
+
+type SPiFunctionTuple = (([Double] -> Matrix Double,Int,[Maybe Double],[Maybe Double]),([Double] -> Vector Double,Int,[Maybe Double],[Maybe Double]))
+gtrF :: SPiFunctionTuple
+gtrF = ((gtrS,5,replicate 5 $ Just 0.0,replicate 5 $ Nothing),(gtrPi,3,replicate 3 $ Just (-20.0),replicate 3 $ Just 20.0))
+
+customF :: Matrix Double -> Vector Double -> SPiFunctionTuple
+customF s pi = (zeroParam s,zeroParam pi)
+wagF :: SPiFunctionTuple
+wagF = customF wagS wagPi
+jttF :: SPiFunctionTuple
+jttF = customF jttS jttPi
+
+getSensibleParams (f,n,(lower:lowers),(upper:uppers)) = (start:(getSensibleParams (f,n-1,lowers,uppers))) where
+         start = case (lower,upper) of
+                    (Nothing,Nothing) -> 0.0
+                    (Just x,Just y) -> (x+y)/2
+                    (Just x,Nothing) -> x+1.0
+                    (Nothing,Just x) -> x-1.0
+getSensibleParams (_,0,_,_)=[]
