@@ -1125,10 +1125,7 @@ switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
 
                                                                                 
 jcS :: Matrix Double
-jcS = runST $ do 
-        s <- thawMatrix $ (4><4) $ repeat 1.0
-        forM_ [0..3] (\i-> writeMatrix s i i 0.0) 
-        freezeMatrix s
+jcS = gtrS (replicate 5 1.0)
 
 jcPi :: Vector Double
 jcPi = fromList $ replicate 4 0.25
