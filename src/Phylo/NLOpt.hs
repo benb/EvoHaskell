@@ -66,7 +66,7 @@ newuoa = unsafeNlopt newuoa_
 --traceXm a = liftM (traceX a)
 unsafeNlopt met stepSize xtol params f lower upper = unsafeLocalState $ nlopt met stepSize xtol params f lower upper 
 
-nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
+nlopt met stepSize ftol params f lower upper = do lower' <- newArray $ map (realToFrac . fromMaybe (-1E100)) lower
                                                   upper' <- newArray $ map (realToFrac . fromMaybe 1E100) upper 
                                                   stepSize' <- newArray $ map realToFrac stepSize
                                                   let np = length params
@@ -77,7 +77,7 @@ nlopt met stepSize xtol params f lower upper = do lower' <- newArray $ map (real
                                                                       return $ realToFrac ans
                                                   f'' <- wrap f'
                                                   startP <- newArray $ map (realToFrac) params
-                                                  let retCode = fromIntegral $ met (realToFrac xtol) stepSize' startP (fromIntegral np) f'' lower' upper' 
+                                                  let retCode = fromIntegral $ met (realToFrac ftol) stepSize' startP (fromIntegral np) f'' lower' upper' 
                                                   ans <- seq retCode $ fmap (map realToFrac) $ peekArray np startP
                                                   freeHaskellFunPtr f''
                                                   free startP
