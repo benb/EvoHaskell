@@ -30,6 +30,7 @@ Build-Type:     Simple
 Executable smap
         Extensions: ForeignFunctionInterface, CPP
         C-sources: src/Phylo/nlopt_c.c
+        --cpp-options: -DDEBUG
         Main-Is: SMap.hs
         HS-Source-Dirs: src
         ghc-options:     -threaded  -O2 -rtsopts

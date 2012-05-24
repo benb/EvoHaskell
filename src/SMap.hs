@@ -54,10 +54,12 @@ import Control.Monad.ST (runST)
 
 data LMat = Inter | Intra deriving Show
 data OptLevel = FullOpt Double | BranchOpt | QuickBranchOpt | NoOpt deriving Show
-data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String | JC | GTR | GTRF deriving Show
+data SubModel = WAG | WAGF | JTT | JTTF | CustomS String | CustomSF String | JC | GTR | GTRF | HKY | HKYF deriving (Show, Eq)
 whatDataType x = case x of 
-                JC -> Nucleotide
-                _  -> AminoAcid
+                x | x `elem` nucModels -> Nucleotide
+                  | otherwise  -> AminoAcid where
+                                        nucModels = [JC,GTR,GTRF,HKY,HKYF]
+                
 
 --handle options like http://leiffrenzel.de/papers/commandline-options-in-haskell.html
 options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
@@ -107,6 +109,8 @@ optSubR arg opt = do let model = case arg of
                                         "jc" -> JC
                                         "gtr" -> GTR
                                         "gtr,F" -> GTRF
+                                        "hky" -> HKY
+                                        "hky,F" -> HKYF
                                         x | (isF x) -> CustomSF (reverse $ drop 2 $ reverse $ x)
                                           | otherwise -> CustomS x
                      return opt {optSub = model}  where
@@ -130,7 +134,7 @@ gammaModelR arg opt = case arg of
 
 optNoneR opt = return opt {optAlg = OptNone}
 optAlgR arg opt = case arg of 
-                        Nothing -> return opt {optAlg = OptMethod var2}
+                        Nothing -> return opt {optAlg = OptMethod bobyqa}
                         Just name -> return opt {optAlg = OptMethod met} where 
                                         met = case (map toLower name) of 
                                               "bobyqa" -> bobyqa
@@ -181,7 +185,7 @@ defaultOptions = Options {
         optSeed = Nothing,
         optLevel = FullOpt 1E-1,
         optModel = Thmm 0.1 1.0 1.0,
-        optAlg = OptMethod var2,
+        optAlg = OptMethod bobyqa,
         optRaw = False,
         optLog = nullOut,
         optDebug = False,
@@ -239,8 +243,10 @@ getSub model a = do let piF = fromList $ safeScaledAAFrequencies a
                                  JTT -> return jttF
                                  JTTF -> return $ customF jttS piF
                                  JC -> return jcF
-                                 GTRF -> return $ (fst gtrF,zeroParam nucPiF)
                                  GTR -> return gtrF
+                                 GTRF -> return $ (fst gtrF,zeroParam nucPiF)
+                                 HKY -> return hkyF
+                                 HKYF -> return $ (fst hkyF,zeroParam nucPiF)
                                  CustomS x -> do (s,pi) <- parsePamlDatIO x
                                                  return $ customF s pi
                                  CustomSF x -> do (s,pi) <- parsePamlDatIO x
@@ -351,7 +357,11 @@ main = do args <- getArgs
           --manual control of threading
          -- Sync.setNumCapabilities (numThreads)
           let jobThreads=numThreads
-          logger $ "Main model params " ++ (show params)
+          case piP of 
+                0 -> logger $ "Main model params " ++ (show params)
+                x -> do logger $ "Main model params " ++ (show $ reverse $ drop x $ reverse params)
+                        logger $ "Nuc eqm freqs " ++ (show $ toList $ piByLog $ reverse $ take x $ reverse params)
+          logger $ show t2
           let aX = map (fst . leftSplit) $ getAllF t2
           let bX = getLeftSplit t2
 
@@ -660,7 +670,7 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
-optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) [0.1] ((Just 0.01):lower) ((Just 100.0):upper) (flatPriors cats) model where                                                           
+optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate ((length lower)+1) 0.1) ((Just 0.01):lower) ((Just 100.0):upper) (flatPriors cats) model where                                                           
         model = gammaModel cats s pi
                                 
 optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where

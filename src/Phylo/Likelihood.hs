@@ -5,7 +5,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
-       ,jcF,gtrF,gtrS,wagF,jttF,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam) where
+       ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -38,7 +38,7 @@ import Control.Monad.ST
 import Control.Monad
 import Data.Packed.ST
 
-#ifdef Debug
+#ifdef DEBUG
 mytrace = trace
 #else
 mytrace x y = y
@@ -622,7 +622,7 @@ optLeftBLx val tree  =  bestTree where
                                 startB = head $ drop val startBL
                                 startLL = logLikelihood tree
                                 f = (loggedFunc $ invert $ (\x -> logLikelihood $ setLeftBL tree (replace val [x] startBL)))
-                                b= sensibleBrent 1E-3 1E-3 f 1E-6 50.0 startB (f startB)
+                                b= sensibleBrent 1E-3 1E-6 f 1E-6 50.0 startB (f startB)
                                 best = replace val [b] startBL
                                 bestTree' = setLeftBL tree best 
                                 --protect from golden section screw-ups
@@ -911,34 +911,37 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 list@((x,BL):[]) -> (tree',bestParams',Params) : optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where
                                 --initial param opt, use big steps
-                                (bestParams',_) = bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
+                                (bestParams',_) = traceShow (map (*10) stepSize) $ bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
                                 f x = mytrace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) 
                                         where
                                           (outTree,outFuncs) = myFunc x
-                                          ans = logLikelihood outTree
+                                          ans = mytrace ((show x) ++ "...") logLikelihood outTree
                                           derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
                 list@((x,BL):xs) -> (tree',bestParams',Params) : optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where -- Opt Params
-                                bestParams' = case (tail startParams) of 
-                                                        [] -> [sensibleBrent 1E-3 1E-3 f2 upper' lower' (head startParams) (f2 $ head startParams)] where
+                                bestParams2 = case (tail startParams) of 
+                                                        [] -> [sensibleBrent 1E-3 1E-6 f2 upper' lower' (head startParams) (f2 $ head startParams)] where
                                                                         upper' = fromMaybe (-(1E10)) (head lower)
                                                                         lower' = fromMaybe 1E10 (head upper)
                                                                         f2 x = -(fst $ f [x])
-                                                        _  -> fst $ bobyqa stepSize 1E-3 (enforceBounds lower upper startParams) f lower upper 
-                                tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
-                                lkl = logLikelihood tree'
+                                                        _  -> fst $ bobyqa stepSize 1E-6 (enforceBounds lower upper startParams) f lower upper 
+                                tree2 = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams2
+                                lkl = logLikelihood tree2
+                                (tree',bestParams') = case lkl of 
+                                                        n | n > x     -> (tree2,bestParams2)
+                                                          | otherwise -> (tree,startParams) --no improvement!!
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
                                 f x = mytrace ((show x) ++ " -> " ++ (show ans) ++ "\n") (ans,Just derivs) where
                                         (outTree,outFuncs) = myFunc x
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
-                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*10)) && (t /= Full) -> (tree',bestParams',Full) : optWithBSIO' method ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
+                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*10)) && (t /= Full) -> trace "FULL" $  (tree',bestParams',Full) : optWithBSIO' method ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
                                 stepSize' = (map (*0.1) myBL)  ++ (map (/2) stepSize)
                            {-let startParams' = enforceBounds lower' upper' (addBL startParams)-}
                                 startParams' = addBL startParams
-                                (bestParams',_) = method stepSize' 1E-3 startParams' f lower' upper' --f startParams'
+                                (bestParams',_) = method stepSize' 1E-6 startParams' f lower' upper' --f startParams'
                             --let (bestParams',err) = output
                                 (tree',_) = getFuncT3 priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
@@ -1134,10 +1137,16 @@ jcF = customF jcS jcPi
 
 zeroParam v = (\x -> v,0,[],[])
 
+genS a b c d e f = (4><4) [0,a,b,c,a,0,d,e,b,d,0,f,c,e,f,0]
+
 gtrS :: [Double] -> Matrix Double
-gtrS [a,b,c,d,e] = (4><4) [0,a,b,c,a,0,d,e,b,d,0,1,c,e,1,0] 
+gtrS [a,b,c,d,e] = genS a b c d e 1
 gtrPi :: [Double] -> Vector Double
 gtrPi = piByLog
+
+hkyS [a,b] = genS (a+b) b b b b (a+b)
+hkyPi = piByLog
+
 
 piByLog xs = fromList $ normaliseL (1.0:(map exp xs))
 logByPi (first:xs) = let mlnFirst = -(log first) in
@@ -1146,7 +1155,9 @@ logByPi (first:xs) = let mlnFirst = -(log first) in
 
 type SPiFunctionTuple = (([Double] -> Matrix Double,Int,[Maybe Double],[Maybe Double]),([Double] -> Vector Double,Int,[Maybe Double],[Maybe Double]))
 gtrF :: SPiFunctionTuple
-gtrF = ((gtrS,5,replicate 5 $ Just 0.0,replicate 5 $ Nothing),(gtrPi,3,replicate 3 $ Just (-20.0),replicate 3 $ Just 20.0))
+gtrF = ((gtrS,5,replicate 5 $ Just 0.00001,replicate 5 Nothing),(gtrPi,3,replicate 3 $ Just (-20.0),replicate 3 $ Just 20.0))
+hkyF :: SPiFunctionTuple
+hkyF = ((hkyS,2,replicate 2 $ Just 0.00001, replicate 2 Nothing),(hkyPi,3,replicate 3 $ Just (-20.0),replicate 3 $ Just 20.0))
 
 customF :: Matrix Double -> Vector Double -> SPiFunctionTuple
 customF s pi = (zeroParam s,zeroParam pi)
