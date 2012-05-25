@@ -49,6 +49,7 @@ import Statistics.Constants (m_epsilon)
 import Control.Exception (assert)
 import qualified Data.Vector.Algorithms.Tim as Tim
 import Control.Monad.ST (runST)
+import System.Process
 
 
 
@@ -384,21 +385,19 @@ main = do args <- getArgs
                                  where (trees,alignments) = (simTrees,simAlignments)
           let simulations = (uncurry zip $ simulations') `using` parBuffer 1 rdeepseq
           let simS = map (dualStochMap stochmapTTA (interLMat nClasses alphabetSize) (intraLMat nClasses alphabetSize)) simulations
+          let gnuplot=True
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
                 let simS' = case jobThreads of 
                                 1 -> simS
                                 _ -> simS `using` parBuffer jobThreads rdeepseq
-                mapM (\(i,j) -> j `deepseq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
-                putStrLn "" --finish output bar
                 let readIn name = do mydata <- BS.readFile name
                                      let ans = (decode mydata) :: ([[Double]],[[Double]])
                                      return ans
-                let outputMat (name,fx,m1,ansDesc) = do
+                let outputMat (name,fx,m1,ansDesc,outputF,simSS,doTree) = do
                                  let tot x = foldr (+) (0.0) x
-                                 let d = map fx simS'
-
+                                 let d = map fx simSS
                                  when raw $ do 
                                      writeFile (name ++ "-real-raw.txt") $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) ansDesc
                                      let writeFiles x = writeFile (name ++ "-boot.raw") $ unlines $ map (annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2)) x
@@ -415,24 +414,35 @@ main = do args <- getArgs
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
                                                       return $ makeQQLine boots real
                                  (line,lower,upper,pval) <- qqFunc concat "raw"  d
-                                 renderableToPDFFile (makePlot line (zip lower upper) PDF) 480 480 $ name ++ "-all.pdf"
+                                 outputF (name ++ "-all") line lower upper
                                  putMVar m1 ()
                                  (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" d
-                                 renderableToPDFFile (makePlot line1 (zip lower1 upper1) PDF) 480 480 $ name ++ "-edge.pdf"
+                                 outputF (name ++ "-edge") line1 lower1 upper1
                                  putMVar m1 ()
                                  (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" d
-                                 renderableToPDFFile (makePlot line2 (zip lower2 upper2) PDF) 480 480 $ name ++ "-site.pdf"
+                                 outputF (name ++ "-site") line2 lower2 upper2
                                  putMVar m1 ()
-                                 let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile (map (map tot) x) (map tot ansDesc))
-                                 let eQM = edgeQuantileMap d
-                                 let tempTree = annotateTreeWith eQM t2
-                                 writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
-                                 putMVar m1 ()
-                                 writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
-                                 putMVar m1 ()
+                                 when doTree $ do
+                                   let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile (map (map tot) x) (map tot ansDesc))
+                                   let eQM = edgeQuantileMap d
+                                   let tempTree = annotateTreeWith eQM t2
+                                   writeFile (name ++ "-colour-tree.xml")  $ unlines $ quantilePhyloXML (annotateTreeWith eQM t2)
+                                   putMVar m1 ()
+                                   writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
+                                   putMVar m1 ()
                 let ansIntra = stochmapTTA (intraLMat nClasses alphabetSize) t2 pAln
+                case gnuplot of
+                        False -> mapM_ (\(i,j) -> j `deepseq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
+                        True  -> mapM_ (\(i,j) -> do 
+                                          when (i `mod` 10==0) $ do 
+                                             m1<-newEmptyMVar
+                                             forkIO $ outputMat ("subs",snd,m1,ansIntra,textOutput,take i simS',False)
+                                             forM_ [1..3] $ (\x->takeMVar m1)
+                                          j `deepseq` outputProgress 100 (fromIntegral numSim) (fromIntegral i)
+                                       ) $ zip [1..] simS'
+                putStrLn "" --finish output bar
                 m1<-newEmptyMVar
-                forkIO $ outputMat (prefix++"-subs",snd,m1,ansIntra)
+                forkIO $ outputMat (prefix++"-subs",snd,m1,ansIntra,pdfOutput,simS',True)
                 let prog mVar y x = do 
                     putChar '\r'
                     takeMVar mVar
@@ -441,13 +451,37 @@ main = do args <- getArgs
                    then do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 5
                            mapM_ (prog m1 5) [1..5]
                    else do putStr $ mkProgressBar (msg "plotting    ") exact 100 0 10
-                           forkIO $ outputMat (prefix++"-switch",fst,m1,stochmapTTA (interLMat nClasses alphabetSize) t2 pAln)
+                           forkIO $ outputMat (prefix++"-switch",fst,m1,stochmapTTA (interLMat nClasses alphabetSize) t2 pAln,pdfOutput,simS',True)
                            mapM_ (prog m1 10) [1..10]
                 putStrLn ""
                 putStrLn " done"
                 return Nothing
           withTemporaryDirectory "smap" finishcalc 
 
+pdfOutput file line lower upper = renderableToPDFFile  (makePlot line (zip lower upper) PDF) 480 480 (file ++".pdf")
+
+textOutput file line lower upper = do (Just sIn,Just sOut,Just sErr,_)<-createProcess (proc "gnuplot" []) {std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe}
+                                      withTemporaryDirectory "gnuplot" (\prefix -> do 
+                                          let fname x = prefix ++ x
+                                          writeRaw (fname "line") line
+                                          writeRaw (fname "lower") lower
+                                          writeRaw (fname "upper") upper
+                                          hPutStrLn sIn "set terminal dumb"
+                                          hPutStrLn sIn "set key 0.45,0.85"
+                                          hPutStrLn sIn "set xlabel 'theoretical'"
+                                          hPutStrLn sIn "set ylabel 'empirical'"
+                                          hPutStrLn sIn $ "plot '" ++ (fname "line") ++ "' title '' with lines, '" ++ (fname "lower") ++ "' title 'lower' with lines, '" ++ (fname "upper") ++ "' title 'upper' with lines"
+                                          --putStrLn $ "plot '" ++ (fname "line") ++ "' title '' with lines, '" ++ (fname "lower") ++ "' title 'lower' with lines, '" ++ (fname "upper") ++ "' title 'upper' with lines"
+                                          hPutStrLn sIn "exit"
+                                          putStrLn file
+                                          putStrLn ""
+                                          putStrLn =<< (hGetContents sErr) 
+                                          putStrLn =<< (hGetContents sOut) 
+                                          )
+
+                                       
+                                      
+                                      
 
 annotatedSplits splits columns = unlines $ map s $ zip (map annotate splits) (map p columns) where
         annotate (a,b) = (showList "," a) ++ " " ++ (showList "," b)
@@ -462,7 +496,7 @@ outputProgress width numSim i = do
    putChar '\r'
    putStr $ mkProgressBar (msg "bootstrapping") exact width i numSim
 
-writeRaw filename list = writeFile filename (intercalate "\n" $ map show list)
+writeRaw filename list = writeFile filename ((intercalate "\n" $ map show list) ++"\n")
 
 
 dualStochMap stochmapTT lM1 lM2 (t,a) = (stochmapTT lM1 t a, stochmapTT lM2 t a) 
