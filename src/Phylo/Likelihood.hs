@@ -1,7 +1,7 @@
 {-# Language ScopedTypeVariables,CPP #-}
-module Phylo.Likelihood (optBSParamsBL,pAlignment,logLikelihood,
+module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        DNode(DLeaf,DINode,DTree),PatternAlignment(PatternAlignment),addModelFx,structDataN
-       ,mapBack,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds
+       ,mapBack,gamma,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds,getBL
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
@@ -184,6 +184,9 @@ pAlignment (ListAlignment names seqs columns) = PatternAlignment names seqs colu
                                                    --lets keep the order (initial slow impl)
                                                    patterns = nub columns
                                                    counts = map (\x->length $ findIndices (==x) columns) patterns 
+
+lAlignment (PatternAlignment names seqs columns _ _) = ListAlignment names seqs columns
+
 mapBack :: PatternAlignment -> [Int]
 mapBack (PatternAlignment _ _ columns patterns _) = map (\x->fromJust $ findIndex (==x) patterns) columns
 
@@ -737,7 +740,7 @@ quickLkl aln tree pi s = qdLkl 1 [1.0] AminoAcid aln tree (basicModel s pi) []
 quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid aln tree (gammaModel numCat s pi) [alpha]
 
 gammaModel numCat (sF,sN) (piF,piN) (alpha:xs) = (models,replicate numCat pi) where
-                                models = map (\r -> (\x ->(scaledpT r eigenS x,mat))) $ gamma numCat alpha
+                                models = map (\r -> (\x ->(scaledpT r eigenS x, setRate r mat pi))) $ gamma numCat alpha
                                 (eigenS,mat) = quickEigen' pi s
                                 s = sF (take sN xs)
                                 pi = piF (take piN (drop sN xs))
@@ -911,7 +914,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                 --((x,t):(x',t'):(x'',t''):(x''',t'''):xs) | (x-x''' < cutoff) -> optWithBSIO' method iterations cutoff numBSParam mapping (incrementStepSize stepSize) limitStepSize lower upper priors model tree startParams
                 list@((x,BL):[]) -> (tree',bestParams',Params) : optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where
                                 --initial param opt, use big steps
-                                (bestParams',_) = traceShow (map (*10) stepSize) $ bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
+                                (bestParams',_) = bobyqa (map (*10) stepSize) 1E-2 (enforceBounds lower upper startParams) f lower upper 
                                 tree' = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams'
                                 lkl = logLikelihood tree'
                                 myFunc = getFuncT1A priors (fromJust mapping) numBSParam model tree
@@ -937,7 +940,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                         (outTree,outFuncs) = myFunc x
                                         ans = logLikelihood outTree
                                         derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
-                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*10)) && (t /= Full) -> trace "FULL" $  (tree',bestParams',Full) : optWithBSIO' method ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
+                list@((x,t):(x',t'):_:_:xs) | (x-x' < (cutoff*10)) && (t /= Full) -> (tree',bestParams',Full) : optWithBSIO' method ((lkl,Full):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' (dropBL bestParams') where --full Opt
                                 stepSize' = (map (*0.1) myBL)  ++ (map (/2) stepSize)
                            {-let startParams' = enforceBounds lower' upper' (addBL startParams)-}
                                 startParams' = addBL startParams
