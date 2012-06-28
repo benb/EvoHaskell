@@ -5,7 +5,8 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
-       ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog) where
+       ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
+       ,simpleModel) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -739,6 +740,15 @@ basicModel s pi _ = ([model],[pi]) where
 quickLkl aln tree pi s = qdLkl 1 [1.0] AminoAcid aln tree (basicModel s pi) []
 quickGamma numCat alpha aln tree pi s = qdLkl 1 (flatPriors numCat) AminoAcid aln tree (gammaModel numCat s pi) [alpha]
 
+simpleModel :: ([Double]->Matrix Double,Int) -> ([Double] -> Vector Double,Int) -> [Double] -> ([BranchModel],[Vector Double])
+simpleModel (sF,sN) (piF,piN) xs = ([model],[pi]) where
+                                   pi = piF (take piN (drop sN xs)) 
+                                   s = sF (take sN xs)
+                                   (eigenS,qMat) = quickEigen' pi s
+                                   model :: BranchModel
+                                   model x = (standardpT eigenS x,normQ qMat pi)
+
+
 gammaModel numCat (sF,sN) (piF,piN) (alpha:xs) = (models,replicate numCat pi) where
                                 models = map (\r -> (\x ->(scaledpT r eigenS x, setRate r mat pi))) $ gamma numCat alpha
                                 (eigenS,mat) = quickEigen' pi s
@@ -924,12 +934,13 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                           ans = mytrace ((show x) ++ "...") logLikelihood outTree
                                           derivs = map getDeriv $ zip5 (repeat ans) (map (logLikelihood .) outFuncs) x lower upper
                 list@((x,BL):xs) -> (tree',bestParams',Params) : optWithBSIO' method ((lkl,Params):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' bestParams' where -- Opt Params
-                                bestParams2 = case (tail startParams) of 
-                                                        [] -> [sensibleBrent 1E-3 1E-6 f2 upper' lower' (head startParams) (f2 $ head startParams)] where
+                                bestParams2 = case startParams of 
+                                                        []  -> []
+                                                        [p] -> [sensibleBrent 1E-3 1E-6 f2 upper' lower' p (f2 p)] where
                                                                         upper' = fromMaybe (-(1E10)) (head lower)
                                                                         lower' = fromMaybe 1E10 (head upper)
                                                                         f2 x = -(fst $ f [x])
-                                                        _  -> fst $ bobyqa stepSize 1E-6 (enforceBounds lower upper startParams) f lower upper 
+                                                        ps  -> fst $ bobyqa stepSize 1E-6 (enforceBounds lower upper ps) f lower upper 
                                 tree2 = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree bestParams2
                                 lkl = logLikelihood tree2
                                 (tree',bestParams') = case lkl of 

@@ -40,6 +40,7 @@ import Data.Binary
 import Data.Maybe
 import System.IO.Unsafe
 import qualified Data.ByteString.Lazy as BS
+import qualified Data.ByteString.Lazy.Char8 as BSC
 import qualified Data.Vector.Unboxed as UVec
 import qualified Text.JSON as JSON
 import qualified Statistics.Function as SF
@@ -50,6 +51,7 @@ import Control.Exception (assert)
 import qualified Data.Vector.Algorithms.Tim as Tim
 import Control.Monad.ST (runST)
 import System.Process
+import Phylo.Alignment.Parsers (parseFasta)
 
 
 
@@ -72,6 +74,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option [] ["opt-bootstrap"] (ReqArg optFR "full, branch, quick, none") "Optimisation of bootstraps"
           , Option [] ["thmm"] (OptArg thmmModelR "init params") "Use THMM model"
           , Option [] ["gamma"] (OptArg gammaModelR "init params") "Use Gamma model"
+          , Option [] ["basic"] (NoArg basicModelR) "Use simple model (no heterogeneity)"
           , Option [] ["opt"] (OptArg optAlgR "opt function") "Optimise model for real data (default)"
           , Option [] ["noopt"] (NoArg optNoneR) "Don't optimise model for real data"
           , Option [] ["raw"] (NoArg optRawR) "include raw data output"
@@ -80,6 +83,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg optAlnR "FILE") "Alignment"
           , Option ['m'] ["model"] (ReqArg optSubR "SUBMODEL") "model (wag or wag,F (default) or jtt or jtt,F or <customFile> or <customFile>,F)"
           , Option [] ["simulate"] (ReqArg optSimulateR "LENGTH") "simulate a sequence alignment from given model"
           , Option ['p'] ["threads"] (ReqArg setThreads "THREADS") "set number of threads to use in calculation (default 1)"
+          , Option [] ["intermediate"] (NoArg (\opt -> return opt {optGnuPlot=True})) "plot intermediate results to terminal (requires gnuplot in $PATH)"
             ]
 
 setThreads arg opt = return opt {optThreads = (read arg)} 
@@ -132,6 +136,7 @@ gammaModelR arg opt = case arg of
                       Just args -> case (read args) of 
                                         a -> return opt { optModel = Ras a }
 
+basicModelR opt = return opt {optModel = Basic}
 
 optNoneR opt = return opt {optAlg = OptNone}
 optAlgR arg opt = case arg of 
@@ -167,7 +172,8 @@ data Options = Options  {
         optSub :: SubModel,
         optSimulateOnly :: Maybe Int,
         optJobName :: Maybe String,
-        optThreads :: Int
+        optThreads :: Int,
+        optGnuPlot :: Bool
 } deriving Show
 
 nullOut :: Logger
@@ -193,11 +199,12 @@ defaultOptions = Options {
         optSub = WAGF,
         optSimulateOnly = Nothing,
         optJobName = Nothing,
-        optThreads = 1
+        optThreads = 1,
+        optGnuPlot = False
 }
 
 -- alpha sigma pInv | alpha
-data Model = Thmm Double Double Double | Ras Double deriving Show
+data Model = Thmm Double Double Double | Ras Double | Basic deriving Show
 data OptAlg = OptNone | OptMethod NLOptMethod deriving Show
 
 optAlnR arg opt = return opt { optAln = Just arg }
@@ -271,7 +278,8 @@ main = do args <- getArgs
                   optSub = subModel,
                   optSimulateOnly = simulateOnly,
                   optJobName = jobName,
-                  optThreads = numThreads
+                  optThreads = numThreads,
+                  optGnuPlot = gnuplot
           } = opts
           let dataType = whatDataType subModel
           let prefix = case jobName of
@@ -321,17 +329,21 @@ main = do args <- getArgs
           let pi = (piF,piP)
           let extraParams :: [Double] = ((getSensibleParams sMatAll)  ++ (getSensibleParams piAll))
           let alphabetSize = dataSize dataType
-          let (modelF,initparams,qsetF,optF) = case modelParams of 
-                                           Ras a -> (gammaModel cats sMat pi,(a:extraParams),(\x -> map toLists (gammaModelQ cats sMat pi x)), optGammaModel method cats pi sMat extraLowerParams extraUpperParams)
-                                           Thmm a b c -> (thmmModel (cats+1) sMat pi,(a:b:c:extraParams),(\x -> [toLists $ thmmModelQ (cats+1) sMat pi x]), optThmmModel method 1 cats pi sMat extraLowerParams extraUpperParams)
+          let (modelF,initparams,optF) = case modelParams of 
+                                           Basic -> (simpleModel sMat pi,extraParams,optSimpleModel method pi sMat extraLowerParams extraUpperParams)
+                                           Ras a -> (gammaModel cats sMat pi,(a:extraParams), optGammaModel method cats pi sMat extraLowerParams extraUpperParams)
+                                           Thmm a b c -> (thmmModel (cats+1) sMat pi,(a:b:c:extraParams), optThmmModel method 1 cats pi sMat extraLowerParams extraUpperParams)
           let (t2',priors,nClasses) = case modelParams of 
-                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),[1.0],(cats+1))
-                                           Ras _ -> (addModelFx (structDataN 1 dataType (pAln) t) (modelF initparams) (flatPriors (length $ qsetF initparams)),flatPriors cats,1)
+                                           Basic -> (addModelFx (structDataN 1 dataType pAln t) (modelF initparams) [1.0],[1.0],1)
+                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) dataType (pAln) t) (modelF initparams) [1.0],[1.0],(cats+1))
+                                           Ras _ -> (addModelFx (structDataN 1 dataType (pAln) t) (modelF initparams) (flatPriors cats),flatPriors cats,1)
+          logger $ show (intraLMat nClasses alphabetSize)
           case simulateOnly of 
                         Just alnLength -> do let emptyAlignment = quickListAlignment (Phylo.Tree.names t) [] 
                                              let emptyTree= case modelParams of 
-                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
-                                                                   Ras a      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors (length $ qsetF initparams))
+                                                                   Basic      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
+                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
+                                                                   Ras a      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors cats)
                                              mapM putStr $ toFasta $ makeSimulatedAlignment dataType stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
@@ -355,6 +367,7 @@ main = do args <- getArgs
                                                 putStrLn ""
                                                 return (cachedBranchModelTree a,b)
          
+          logger $ "Initial log likelihood " ++ (show $ logLikelihood t2)
           --manual control of threading
          -- Sync.setNumCapabilities (numThreads)
           let jobThreads=numThreads
@@ -362,6 +375,7 @@ main = do args <- getArgs
                 0 -> logger $ "Main model params " ++ (show params)
                 x -> do logger $ "Main model params " ++ (show $ reverse $ drop x $ reverse params)
                         logger $ "Nuc eqm freqs " ++ (show $ toList $ piByLog $ reverse $ take x $ reverse params)
+          logger $ "Main BL " ++ (show $ getBL t2)
           logger $ show t2
           let aX = map (fst . leftSplit) $ getAllF t2
           let bX = getLeftSplit t2
@@ -374,18 +388,29 @@ main = do args <- getArgs
           --stochmapHandle <- openFile "stochmap.out" WriteMode
           --let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT (Just stochmapHandle) nProc nState a lM tree) (mapBack a) (getPriors tree)
           let stochmapTTA lM tree a = discrep $ stochmapOrder (stochmapT Nothing nProc nState a lM tree) (mapBack a) (getPriors tree)
-          let stdGens = take numSim $ genList stdGen
+          let stochmapDEBUG fname lM tree a = case debugging of 
+               False -> return ()
+               True  -> do let st = stochmapT Nothing nProc nState a lM tree
+                           let ans = stochmapOrderX st (mapBack a) (getPriors tree) 
+                           writeFile fname $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) $ map transpose $ transpose $ fst ans
+                           writeFile ("prior " ++ fname) $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) $ map (\x-> [x]) $ snd st
+          let stdGens = take (numSim) $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
           let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) priors x dataType nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
           let simulations' = case (optBoot,optMethod) of 
-                                 (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b)) a) $ map (\x->last $ optF level x params) $ trees,alignments)
+                                 (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b) ++ "\n" ++ "BL " ++ (show $ getBL a)) a) $ map (\x->last $ optF tol x initparams) $ trees,alignments)
                                  (BranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (QuickBranchOpt,_) -> (map optBLDFull0 trees,alignments)
                                  (NoOpt,_) -> (trees,alignments)
                                  where (trees,alignments) = (simTrees,simAlignments)
+          --let t2 = head $ fst simulations'
+          --let pAln = head $ simAlignments
+          --let simulations'' = (tail $ fst simulations', tail $ snd simulations')
+          --let simulations' = simulations''
+
           let simulations = (uncurry zip $ simulations') `using` parBuffer 1 rdeepseq
+          mapM_ putStrLn $ (toFasta . lAlignment) $ head $ snd simulations'
           let simS = map (dualStochMap stochmapTTA (interLMat nClasses alphabetSize) (intraLMat nClasses alphabetSize)) simulations
-          let gnuplot=True
           let finishcalc tempdir = do 
                 logger tempdir
                 outputProgressInit 100 (fromIntegral numSim)
@@ -412,16 +437,24 @@ main = do args <- getArgs
                                                       when (raw && proc/="raw") $ do
                                                                     writeRaw (name ++"-boot-" ++ proc ++".txt") $ concat boots
                                                                     writeRaw (name ++"-real-" ++ proc ++".txt") $ real
-                                                      return $ makeQQLine boots real
+                                                      return $ makeQQLine proc boots real
                                  (line,lower,upper,pval) <- qqFunc concat "raw"  d
                                  outputF (name ++ "-all") line lower upper
                                  putMVar m1 ()
                                  (line1,lower1,upper1,pval1) <- qqFunc (map tot) "edge" d
                                  outputF (name ++ "-edge") line1 lower1 upper1
                                  putMVar m1 ()
+                                 putStrLn "XXXXXXXXXX"
+                                 print (length d)
+                                 print (length $ head d)
+                                 print (length ansDesc)
+                                 forM_ (zip ansDesc [0..]) (\(_,i)-> 
+                                    do (lineX,lowerX,upperX,pvalX) <- qqFunc (!!i) ("edge"++(show i)) d
+                                       outputF (name ++ "-" ++ (show i) ++ "-edge") lineX lowerX upperX)
                                  (line2,lower2,upper2,pval2) <- qqFunc (map tot . transpose) "site" d
                                  outputF (name ++ "-site") line2 lower2 upper2
                                  putMVar m1 ()
+                                 
                                  when doTree $ do
                                    let edgeQuantileMap x = zip (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) (perLocationQuantile (map (map tot) x) (map tot ansDesc))
                                    let eQM = edgeQuantileMap d
@@ -430,6 +463,8 @@ main = do args <- getArgs
                                    putMVar m1 ()
                                    writeFile (name ++ "-pvals.txt")  $ unlines $ map (\(x,y) -> x ++ " " ++ (show y)) $ zip ["all","edge","site"] [pval,pval1,pval2]
                                    putMVar m1 ()
+                stochmapDEBUG "real.stoch" (intraLMat nClasses alphabetSize) t2 pAln
+                mapM_ (\(i,(t,a)) -> stochmapDEBUG ("boot" ++ (show i)++".stoch") (intraLMat nClasses alphabetSize) t a) $ zip [0..] simulations
                 let ansIntra = stochmapTTA (intraLMat nClasses alphabetSize) t2 pAln
                 case gnuplot of
                         False -> mapM_ (\(i,j) -> j `deepseq` outputProgress 100 (fromIntegral numSim) i) $ zip [1..] simS'
@@ -463,11 +498,13 @@ pdfOutput file line lower upper = renderableToPDFFile  (makePlot line (zip lower
 textOutput file line lower upper = do (Just sIn,Just sOut,Just sErr,_)<-createProcess (proc "gnuplot" []) {std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe}
                                       withTemporaryDirectory "gnuplot" (\prefix -> do 
                                           let fname x = prefix ++ x
-                                          writeRaw (fname "line") line
-                                          writeRaw (fname "lower") lower
-                                          writeRaw (fname "upper") upper
+                                          let qLen = length line
+                                          let xvals =  [(fromIntegral ((2*x)+1))/(fromIntegral (2*qLen))|x<-[0..(qLen-1)]]
+                                          writeFile (fname "line") $ intercalate "\n" $ map (\(x,y) -> (show x) ++ " " ++ (show y)) $ zip xvals line
+                                          writeFile (fname "lower") $ intercalate "\n" $ map (\(x,y) -> (show x) ++ " " ++ (show y)) $ zip xvals lower
+                                          writeFile (fname "upper") $ intercalate "\n" $ map (\(x,y) -> (show x) ++ " " ++ (show y)) $ zip xvals upper
                                           hPutStrLn sIn "set terminal dumb"
-                                          hPutStrLn sIn "set key 0.45,0.85"
+                                          hPutStrLn sIn "set key 0.3,0.85"
                                           hPutStrLn sIn "set xlabel 'theoretical'"
                                           hPutStrLn sIn "set ylabel 'empirical'"
                                           hPutStrLn sIn $ "plot '" ++ (fname "line") ++ "' title '' with lines, '" ++ (fname "lower") ++ "' title 'lower' with lines, '" ++ (fname "upper") ++ "' title 'upper' with lines"
@@ -508,9 +545,13 @@ reverseQuantile myQList point = case (filter (\(x,y) -> point <= y) $ zip [0..] 
                                         (x:xs) -> fst $x
                                         [] -> length $ myQList
 
+
+
 discrep :: ([[Double]], [Double]) -> [[Double]]
 discrep ((x:xs),(y:ys)) = (map (\i->i-y) x):(discrep (xs,ys))
 discrep ([],[]) = []
+discrep x = traceShow x undefined
+--discrep (xs,ys)= xs
 
 perLocationQuantile :: [[Double]] -> [Double] -> [Double]
 perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fromIntegral . (reverseQuantile simQuantiles)) locdist where
@@ -521,22 +562,37 @@ perLocationQuantile simulated locdist = map ((/ (fromIntegral numQuantile)) . fr
 
 
 
+writeQ proc emp sim = unsafePerformIO $ do 
+                     let inter x = intercalate " " $ map show x
+                     writeFile ("qDump-" ++ proc) $ unlines $ map inter (emp:sim)
 -- number of Quantiles needed
 -- simulated data [sim_n [edge/site]]
 
-makeQQLine :: [[Double]] -> [Double] -> ([Double],[Double],[Double],Double) 
-makeQQLine simulated empirical = (empQuantile,lower,upper,pvalue) where
+dumpQ id es ss = dumpQ' 0 id es ss
+dumpQ' x id (e:es) (s:ss) = do putStrLn $ id ++ " " ++ (show x) ++ " " ++ (show e) ++ " " ++ (show s)
+                               dumpQ' (x+1) id es ss
+dumpQ' x id [] [] = putStrLn $ id ++ " FIN " ++ (show x)
+
+
+makeQQLine :: String -> [[Double]] -> [Double] -> ([Double],[Double],[Double],Double) 
+--makeQQLine proc simulated empirical  =  (empQuantile,lower,upper,pvalue) where
+makeQQLine proc simulated empirical = (unsafePerformIO $ putStrLn $ "\nOK? " ++ (show $ length $ UVec.toList fvals) ++ " " ++ (show $ length fvalSim) ++ " " ++ (show $ length $ UVec.toList $ head fvalSim) ++ " " ++ (show $ length simulated) ++ " " ++ (show $ length $ head simulated)) `seq` 
+                                      (unsafePerformIO $ dumpQ ("E"++proc) (empirical) (transpose simulated)) `seq`
+                                      (unsafePerformIO $ dumpQ ("R"++proc) (UVec.toList fvals) (transpose (map UVec.toList fvalSim))) `seq` (unsafePerformIO $ dumpQ ("Q"++proc) empQuantile (transpose simQuantile)) `seq` (empQuantile,lower,upper,pvalue) where
         simcount = length simulated
         numQ = simcount
         f (real,sim) = (fromIntegral $ length $ filter (<= real) sim) / (fromIntegral simcount)
+        f2 (real,sim) = (fromIntegral $ (length $ filter (<= real) sim)-1) / ((fromIntegral simcount)-1)
 
-        fval x = timSort $ map f $ zip x (transpose simulated)
+        fval x = UVec.fromList $ map f $ zip x (transpose simulated)
+        fval2 x = UVec.fromList $ map f2 $ zip x (transpose simulated)
         fvals = fval empirical
-        fvalSim = map fval simulated
+        fvalSim = map fval2 simulated
 
-        makeAllQ = continuousAll medianUnbiased numQ 
+        makeAllQ = continuousAll' medianUnbiased numQ 
         empQuantile = makeAllQ fvals 
         simQuantile = map makeAllQ fvalSim
+        --simQuantile' = (writeQ proc empQuantile simQuantile) `seq` (writeQ (proc ++ "bq") (UVec.toList fvals) (map UVec.toList fvalSim)) `seq` map timSort $ transpose simQuantile
         simQuantile' = map timSort $ transpose simQuantile
         
         pvalue = 1.0 - (cramerVonMises empQuantile simQuantile)
@@ -639,6 +695,11 @@ stochmapOrder (condE,priorE) mapping priors = order where
                                                 fixProc2 pr xs = (map $ fixProc pr) (transpose xs)
                                                 order = (transpose $ map (\i-> (map (!!i) condE')) mapping, priorE')
 
+stochmapOrderX :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> ([[[Double]]],[[Double]])
+stochmapOrderX (condE,priorE) mapping priors = order where
+                                                order = (map (\i-> (map (!!i) $ map (transpose) condE)) mapping, priorE)
+
+
 stochmapOut :: ([[[Double]]],[[Double]]) -> [Int] -> [Double] -> (String -> IO()) -> IO ()
 stochmapOut (condE',priorE') mapping priors f = do 
                                                 f header
@@ -704,6 +765,8 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
+optSimpleModel method pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate (length lower) 0.1) lower upper [1.0] (simpleModel s pi) 
+
 optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate ((length lower)+1) 0.1) ((Just 0.01):lower) ((Just 100.0):upper) (flatPriors cats) model where                                                           
         model = gammaModel cats s pi
                                 
@@ -714,7 +777,7 @@ optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSPa
 
 newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN classes dataType (pAln) origTree) model priors,pAln) where
         aln = makeSimulatedAlignmentWithGaps dataType stdGen tree origAln
-        pAln = pAlignment aln
+        pAln = sane $ pAlignment aln
 
 
 getAlnData (PatternAlignment names seqs columns patterns counts) = (length counts, length columns,counts) 
@@ -727,10 +790,11 @@ cramerVonMises empQ theQs = pvalue where
         square x = x*x
         pvalue = (fromIntegral $ length (filter (<=wv2_emp) wv2_thes)) / (fromIntegral $ length theQs)
 
+getDim a = (length a, length $ head a, length $ head $ head a, length $ head $ head $ head a, length $ head $ head $ head $ head a)
 stochmapT fh nProc nState pAln' lM tree = unsafePerformIO $ calculateAndWrite nSite nState nBranch nProc nCols lM multiplicites sitemap' partials' qset' sitelikes' pi_i' branchLengths' mixProbs' fh where
         sitemap' = mapBack pAln'
         (nSite,nCols,multiplicites) = getAlnData pAln' --nCols >= nSite by stochmap.c definition.
-        nBranch =  length $ toPBELengths pBEStr
+        nBranch = length $ toPBELengths pBEStr
         pBEStr = getPartialBranchEnds tree
         partials' = map (map (map (toLists . trans))) $ toPBEList pBEStr
         qset' = map toLists $ getQMat tree
@@ -739,4 +803,10 @@ stochmapT fh nProc nState pAln' lM tree = unsafePerformIO $ calculateAndWrite nS
         branchLengths' = toPBELengths pBEStr
         mixProbs' = getPriors tree
 
+sane :: PatternAlignment -> PatternAlignment
+sane pAln = pAlignment $ fromJust parsed where
+                fastaVersion = toFasta $ lAlignment pAln
+                chunks :: [BSC.ByteString] = map BSC.pack fastaVersion
+                bs :: BSC.ByteString = BSC.concat chunks
+                parsed = parseAlignmentString parseFasta bs
 
