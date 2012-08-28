@@ -891,7 +891,6 @@ getFuncT3 priors mapping numBSParam model tree params | mytrace ("getFuncT3 " ++
 splitLists i [] = []
 splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
                  
-
 --optBSParamsBLIO method numBSParam mapping initialStepSize = optWithBSIO' method [] 1E-2 numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
 optBSParamsBL cutoff method numBSParam mapping initialStepSize = optWithBSIO' method [] cutoff numBSParam (Just mapping) initialStepSize (map (/100.0) initialStepSize)
 
