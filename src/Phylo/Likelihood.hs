@@ -6,7 +6,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
-       ,simpleModel) where
+       ,simpleModel,quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped) where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
