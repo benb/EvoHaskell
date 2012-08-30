@@ -20,25 +20,30 @@ import Phylo.Matrix
 import Stochmap
 import Data.Char (isSpace)
 import Phylo.NeXML
+import Phylo.NLOpt
+import Phylo.OpenBLAS as BLAS
+import Phylo.OptOutput
 
 data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
         deriving (Show,Eq,Ord)
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
             Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
-            Option [] ["stochmap"] (ReqArg ThmmStochmap "PARAMS") "Calculate stochastic mapping for Thmm",
             Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
             Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model",
             Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
-            Option ['n'] ["opt-thmmplus"] (NoArg OptThmmP) "Optimise THMM Model",
+            Option ['n'] ["opt-thmm-per-branch"] (NoArg OptThmmP) "Optimise THMM Model",
             Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
             Option [] ["noopt"] (NoArg NoOpt) "Don't optimize",
-            Option [] ["sim0"] (ReqArg OptSim0 "PARAMS") "Simulate WAG",
-            Option [] ["sim1"] (NoArg OptSim1) "Simulation 1",
             Option [] ["sim2"] (ReqArg OptSim2 "PARAMS") "Simulation 2"]
 
+wagSX = ((\_->wagS),0)
+
+wagPiF = piX wagPi
+piX piF = ((\_->piF),0)
 main = do args <- getArgs
+          BLAS.set_num_threads 1
           (aln,tree,stdGen,remainOpts) <- case getOpt Permute options args of 
                          (((AlignmentFile aln):(TreeFile tre):(Seed seed):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
                                                                                            tree <- (liftM readBiNewickTree) (readFile tre)
@@ -57,24 +62,25 @@ main = do args <- getArgs
                 rem -> (4,rem)
           output <- case (aln,tree,(sort remainOpts')) of 
                 (Just a,Right t,[])-> return $ Just $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,(Alpha val):[])-> return $ Just $ "WAG Gamma lkl:" ++ (show $ quickGamma cats (read val) a t wagPi wagS)
+                (Just a,Right t,(Alpha val):[])-> return $ Just $ "WAG Gamma lkl:" ++ (show $ quickGamma' cats t (flatPriors cats) wagPi wagS a (read val))
                 (Just a,Right t,(OptAlpha):[])-> return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                         t2 = structDataN 1 AminoAcid (pAlignment a) t
                                                         piF = fromList $ safeScaledAAFrequencies a
-                                                        model = gammaModel cats wagS piF
-                                                        (optTree,[logalpha]) = optParamsAndBL model t2 [0.5] [0.25,0.25,0.25,0.25] [Just 0.001] [Nothing] 0.01
+                                                        model = gammaModel cats wagSX $ piX piF
+                                                        (optTree,[logalpha],_) = head $ optParamsAndBL model t2 [0.5] [0.25,0.25,0.25,0.25] [Just 0.001] [Nothing] 0.01
                                                         alpha = exp logalpha
                                                         lkl = logLikelihood optTree
                 (Just a,Right t,(OptThmm):[])-> do 
                         let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                                                                                       
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
                         putStrLn "OK"
-                        let model = thmmModel (cats+1) wagS piF
-                        (optTree',[priorZero,alpha,sigma]) <- optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
-                        let optTree = annotateTreeWithNumberSwitchesSigma sigma optTree'
+                        let model = thmmModel (cats+1) wagSX (piX piF)
+                        let progress = optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        (optTree',[priorZero,alpha,sigma]) <- optWithOutput progress
+                        let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
                         let lkl = logLikelihood optTree
                         return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
-                (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
+{--                (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
                                                                 let interintra = head $ drop 3 $ words params
                                                                 let pAln = pAlignment a
                                                                 let (nSite,nCols,multiplicites) = getAlnData pAln where
@@ -124,7 +130,7 @@ main = do args <- getArgs
                                                                 list | NoOpt `elem` list -> return (t4,p) where
                                                                                               p = (initSigma ++ [initP0,initAlpha])
                                                                                               t4 | trace ("NUMMODELS " ++ (show numModels)) True = getFuncT1A [1.0] mapped (1,numModels) model t3 p
-                                                                _ -> optBSParamsBLIO (1,numModels) mapped (map (\x->0.01) lower) lower upper [1.0] model t3 (initSigma ++ [initP0,initAlpha])
+                                                                _ -> optBSParamsBL 1E-2 bobyqa (1,numModels) mapped 4E-1
                                                          let optTree = annotateTreeWithNumberSwitches optTree'
                                                          print optTree
                                                          let (sigma,[priorZero,alpha]) = splitAt numModels optParams
@@ -188,7 +194,7 @@ main = do args <- getArgs
                                                         {-t2 = addModelFx (setBLMapped 1 (dummyTree (structDataN (cats+1) AminoAcid (pAlignment a) t)) mapped ) (thmmPerBranchModel (cats+1) cpRevS cpRevPi [priorZero,alpha]) [1.0]-}
                                                         {-goodNodes = ["E_Nosloc","E_Enccun","E_Gluple","A_Aerper","A_Metbar"] -}
                                                         {-mapped = makeMapping (\(x,y) -> if (((x \\ goodNodes) == []) || ([] == (y \\ goodNodes))) then ([sigma0]) else ([sigma1])) t2-}
-                (a,Right t,(OptSim0 params):[]) -> return $ Just $ concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen (floor length) t2 where
+                (a,Right t,(OptSim0 params):[]) -> return $ Just $ concat $ toFasta $ makeSimulatedAlignment AminoAcid stdGen t2 (floor length)  where  
                                                         alpha:sigma0:sigma1:priorZero:length:[] = map (read) $take 5 $ words params
                                                         goodNodes = splitBy ',' $ head $ drop 5 $ words params 
                                                         piF = case a of 
@@ -201,7 +207,7 @@ main = do args <- getArgs
                 (Just a,Right t,OptSim2 params:[]) -> do (lgInnerS,lgInnerPi) <- parsePamlDatIO "lgInner"
                                                          (lgOuterS,lgOuterPi) <- parsePamlDatIO "lgOuter"
                                                          return $ Just $ compute (lgInnerS,lgInnerPi) (lgOuterS,lgOuterPi) where
-                                                             compute (s0,pi0) (s1,pi1) = concat $ toFasta $ simulateSequences AminoAcid (cats+1) stdGen 349 t3 where
+                                                             compute (s0,pi0) (s1,pi1) = concat $ toFasta $ makeSimulatedAlignment AminoAcid stdGen t3 349 where
                                                                 alpha:sigma0:sigma1:priorZero:[] = map (read) $ words params
                                                                 piF = fromList $ safeScaledAAFrequencies a
                                                                 (model0,pi_0) = thmmPerBranchModel (cats+1) s0 pi0 [priorZero,alpha]
@@ -212,6 +218,7 @@ main = do args <- getArgs
                                                                 mapped = makeMapping (\(x,y) -> if (tfFunc x y)  then ([sigma0]) else ([sigma1])) t2
                                                                 mappedModels = makeMapping (\(x,y) -> if (tfFunc x y) then model1 else model0) t2
                                                                 t3 = restructDataMapped t2 mappedModels [1.0] pi_0
+                                                                --}
                 (_,_,_) -> error "Can't parse something"
           case output of
                Just str -> putStrLn str
@@ -254,8 +261,8 @@ normalise list = map ( / total) list where
                  total = foldl' (+) 0.0 list
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
-optParamsAndBL model tree params priors lower upper cutoff = optWithBS' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
-optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
+optParamsAndBL = optParamsAndBLIO --model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
+optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' bobyqa [] cutoff (0,0) Nothing (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
 
 trim = f . f where 
    f = reverse . dropWhile isSpace

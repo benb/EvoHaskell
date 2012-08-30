@@ -23,6 +23,7 @@ Executable calclkl
         Extensions: ForeignFunctionInterface
         Main-Is: CalcLkl.hs
         HS-Source-Dirs: src
+        ghc-options:  -O2 -rtsopts -threaded
 --Executable testopt
 --        C-sources: src/Phylo/nlopt_c.c
 --        Main-Is: testOpt.hs

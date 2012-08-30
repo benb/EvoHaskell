@@ -6,7 +6,8 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
-       ,simpleModel,quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped) where
+       ,simpleModel,
+       quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped,whichModels,likelihoods,quickGamma') where
 import Phylo.Alignment
 import Phylo.Tree
 import Phylo.Matrix
@@ -86,11 +87,13 @@ posteriorTipsCSV i aln j = intercalate "\n" $ (posteriorTipsCSVX aln) $ posterio
 
 posteriorTipsCSVX aln = map (posteriorTipsCSVX' aln)
 
+{-- provide a model that caches the pT for a given T--}
 cachedBranchModel initDist bm = let cached = (bm initDist) in
                                 \x -> case x of 
                                            x | x == initDist -> cached
                                              | otherwise -> bm x
 
+{-- calculate a tree with a cached pT for each node--}
 cachedBranchModelTree (DTree l m r pLs pC priors pis) = DTree (cachedBranchModelTree l) (cachedBranchModelTree m) (cachedBranchModelTree r) pLs pC priors pis
 cachedBranchModelTree (DINode l r bl model pl) = DINode (cachedBranchModelTree l) (cachedBranchModelTree r) bl (map (cachedBranchModel bl) model) pl
 cachedBranchModelTree (DLeaf name dist seq partial model pl) = DLeaf name dist seq partial (map (cachedBranchModel dist) model) pl
@@ -969,7 +972,7 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 upper' = (replicate numBL $ Just 50.0) ++ upper
                                 addBL p = myBL ++ startParams
                                 dropBL p = drop numBL p
-                list@[] -> (startTree,startParams,Start):(tree',params',BL) : optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
+                list@[] -> (startTree,startParams,Start) : (tree',params',BL) : optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
                                 startTree = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams                                            
                                 tree' = optBLDFull' (logLikelihood startTree) 1E-2 (optLeftBLx 0) startTree                                       
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
@@ -1186,3 +1189,6 @@ getSensibleParams (f,n,(lower:lowers),(upper:uppers)) = (start:(getSensibleParam
                     (Just x,Nothing) -> x+1.0
                     (Nothing,Just x) -> x-1.0
 getSensibleParams (_,0,_,_)=[]
+
+
+whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
