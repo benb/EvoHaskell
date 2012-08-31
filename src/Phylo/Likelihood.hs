@@ -6,7 +6,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
-       ,simpleModel,
+       ,simpleModel,getSubBL,
        quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped,whichModels,likelihoods,quickGamma') where
 import Phylo.Alignment
 import Phylo.Tree
@@ -424,6 +424,10 @@ instance Show DNode where
         show (DLeaf name [d] _ _ _ _) = name++":"++(show d)
         show (DLeaf name d _ _ _ _) = name++":"++(show d)
 
+getSubBL i (DTree l m r mats ints double vectors) = DTree (getSubBL i l) (getSubBL i m) (getSubBL i r) mats ints double vectors
+getSubBL i (DINode l r d m m') = DINode (getSubBL i l) (getSubBL i r) [(d!!i)] m m'
+getSubBL i (DLeaf s d sd mat bms mats) = DLeaf s [(d!!i)] sd mat bms mats
+
 instance NFData DNode where
         rnf (DTree l m r mats ints doubles vectors) = rnf l `seq` rnf m `seq` rnf r `seq` rnf (map toLists mats) `seq` rnf ints `seq` rnf doubles `seq` rnf (map toList vectors) `seq` ()
         rnf (DINode l r doubles models mats) = rnf l `seq` rnf r `seq` rnf doubles `seq` rnf models `seq` rnf (map toLists mats) `seq` ()
@@ -772,6 +776,8 @@ thmmModel numCat (sF,sN) (piF,piN) (priorZero:alpha:sigma:xs) = ([thmm numCat pi
                                pi = piF (take piN (drop sN xs))
                                fullPi = makeFullPi priors pi
 
+
+thmmModel numCat (sF,sN) (piF,piN) list = traceShow list $ error "Bad List"
 {-- TODO refactor this out --}
 thmmModelQ numCat (sF,sN) (piF,piN) (priorZero:alpha:sigma:xs) = (thmmQ numCat pi s priors alpha sigma) where
                                    priors = (replicate (numCat -1) ((1.0-priorZero)/(fromIntegral (numCat-1))) ) ++ [priorZero]
@@ -891,6 +897,9 @@ getFuncT3 priors mapping numBSParam model tree params | mytrace ("getFuncT3 " ++
 --getParamsT3 = getParamsT2 
 
 
+{--
+splitLists 2 [1,2,3,4,5,6,7] => [[1,2],[3,4],[5,6],[7]]
+--}
 splitLists i [] = []
 splitLists i x@(z:zs) = y:(splitLists i ys) where (y,ys) = splitAt i x
                  
@@ -1192,3 +1201,4 @@ getSensibleParams (_,0,_,_)=[]
 
 
 whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
+

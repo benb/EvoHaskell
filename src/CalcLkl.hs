@@ -24,24 +24,64 @@ import Phylo.NLOpt
 import Phylo.OpenBLAS as BLAS
 import Phylo.OptOutput
 
-data Flag = NumCats String | AlignmentFile String | TreeFile String | Alpha String | OptAlpha | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
+data Flag = JobName String | PerBranch String | NumCats String | AlignmentFile String | TreeFile String | Alpha String | Sigma String | Opt | OptAlpha | PriorZero String | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
         deriving (Show,Eq,Ord)
 options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
             Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
+            Option ['j'] ["job-name"] (ReqArg JobName "PREFIX") "Job Name",
             Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
             Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories",
             Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
-            Option ['o'] ["opt-gamma"] (NoArg OptAlpha) "Optimise Gamma Model",
-            Option ['m'] ["opt-thmm"] (NoArg OptThmm) "Optimise THMM Model" ,
-            Option ['n'] ["opt-thmm-per-branch"] (NoArg OptThmmP) "Optimise THMM Model",
-            Option ['p'] ["opt-thmm2"] (ReqArg OptThmm2 "splitsStr") "2 state THMM",
-            Option [] ["noopt"] (NoArg NoOpt) "Don't optimize",
-            Option [] ["sim2"] (ReqArg OptSim2 "PARAMS") "Simulation 2"]
+            Option ['S'] ["sigma"] (ReqArg Sigma "DOUBLE") "Use Switching THMM", 
+            Option ['z'] ["prior-zero"] (ReqArg PriorZero "DOUBLE") "Set Prior for zero rate in THMM",
+            Option ['o'] ["opt"] (NoArg Opt) "Optimise Model",
+            Option [] ["per-branch"] (ReqArg PerBranch "splits") "Per-branch sigma"]
 
 wagSX = ((\_->wagS),0)
 
 wagPiF = piX wagPi
 piX piF = ((\_->piF),0)
+
+
+isGamma flags = ((/=Nothing) $ find alpha flags) && ((==Nothing) $ find sigma flags) where
+               alpha (Alpha x) = True
+               alpha _ = False
+               sigma (Sigma x) = True
+               sigma _ = False
+                
+isThmm flags = findX alpha flags && findX sigma flags where
+               findX a b = (/=Nothing) $ find a b
+               alpha (Alpha x) = True
+               alpha _ = False
+               sigma (Sigma x) = True
+               sigma _ = False
+
+                
+
+getSigma ((Sigma x):xs) = read x
+getSigma (x:xs) = getSigma xs
+getSigma [] = error "No sigma"
+
+getAlpha ((Alpha x):xs) = read x
+getAlpha (x:xs) = getAlpha xs
+getAlpha [] = error "No alpha"
+
+getPriorZero ((PriorZero x):xs) = read x
+getPriorZero (x:xs) = getPriorZero xs
+getPriorZero [] = 0.05
+
+
+getMapping t ((PerBranch x):xs) = getMapping' t x
+getMapping t (x:xs) = getMapping t xs
+getMapping t [] = ((0,0),Nothing)
+
+getMapping' t spl = ((1,(length goodNodes)+1),Just $ makeMapping (allIn goodNodes) t) where
+             goodNodes = map (splitBy ',') $ splitBy ' ' spl
+
+getJobName ((JobName x):xs) = x
+getJobName (x:xs) = getJobName xs
+getJobName [] = error "Need to specify job name with -j"
+
 main = do args <- getArgs
           BLAS.set_num_threads 1
           (aln,tree,stdGen,remainOpts) <- case getOpt Permute options args of 
@@ -62,24 +102,59 @@ main = do args <- getArgs
                 rem -> (4,rem)
           output <- case (aln,tree,(sort remainOpts')) of 
                 (Just a,Right t,[])-> return $ Just $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,(Alpha val):[])-> return $ Just $ "WAG Gamma lkl:" ++ (show $ quickGamma' cats t (flatPriors cats) wagPi wagS a (read val))
-                (Just a,Right t,(OptAlpha):[])-> return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
-                                                        t2 = structDataN 1 AminoAcid (pAlignment a) t
-                                                        piF = fromList $ safeScaledAAFrequencies a
-                                                        model = gammaModel cats wagSX $ piX piF
-                                                        (optTree,[logalpha],_) = head $ optParamsAndBL model t2 [0.5] [0.25,0.25,0.25,0.25] [Just 0.001] [Nothing] 0.01
-                                                        alpha = exp logalpha
-                                                        lkl = logLikelihood optTree
-                (Just a,Right t,(OptThmm):[])-> do 
-                        let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                                                                                       
+                (Just a,Right t,other) | isGamma other -> do let shouldOpt = (/=Nothing) $ find (==Opt) other
+                                                             let jobName = getJobName other
+                                                             putStrLn $ "Job Name: " ++ jobName
+                                                             (optTree,[alpha]) <- case shouldOpt of 
+                                                                                       True ->   optWithOutput progress
+                                                                                       False ->  return (addModelNNode t2 m' (flatPriors cats) pi',[alpha']) where
+                                                                                                     (m',pi') = model [alpha']
+                                                             let lkl = logLikelihood optTree
+                                                             writeFile (jobName ++ "-out.tre") (show optTree)
+                                                             writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
+                                                             return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
+                                                                 alpha' = getAlpha other
+                                                                 t2 = structDataN 1 AminoAcid (pAlignment a) t
+                                                                 piF = fromList $ safeScaledAAFrequencies a
+                                                                 model = gammaModel cats wagSX $ piX piF
+                                                                 progress = optParamsAndBLIO model t2 [alpha'] (flatPriors cats) [Just 0.001] [Nothing] 0.01
+                (Just a,Right t,other) | isThmm other -> do 
+                        let priorZero' = getPriorZero other
+                        let alpha' = getAlpha other
+                        let sigma' = getSigma other
+                        let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                             
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
-                        putStrLn "OK"
+                        let (numBSParams,mapping) = getMapping t2 other
                         let model = thmmModel (cats+1) wagSX (piX piF)
-                        let progress = optParamsAndBLIO model t2 [0.21546728749044514,0.8209232358343468,10.33751049838077] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
-                        (optTree',[priorZero,alpha,sigma]) <- optWithOutput progress
-                        let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
-                        let lkl = logLikelihood optTree
-                        return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                        let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        let shouldOpt = numBSParams /= (0,0) || ((/=Nothing) $ find (==Opt) other) --always opt if numBSParams /= 0
+                        let jobName = getJobName other
+                        putStrLn $ "Job Name: " ++ jobName
+                        (optTree',[priorZero,alpha,sigma]) <- case shouldOpt of 
+                                                                True -> optWithOutput progress
+                                                                False -> return (addModelNNode t2 m' [1.0] pi',[priorZero',alpha',sigma']) where
+                                                                           (m',pi') = model [priorZero',alpha',sigma']
+                        ans <- if numBSParams == (0,0)
+                            then 
+                             do let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
+                                let lkl = logLikelihood optTree
+                                writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++"\n"
+                                writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
+                                writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigma) ++ "\n"
+                                return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                            else
+                             do let model = thmmPerBranchModel (cats+1) wagS piF
+                                let (a,b) = numBSParams
+                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)++[priorZero,alpha]) [1.0] ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
+                                (optTree2,multiParams) <- optWithOutput progress
+                                let (alpha:priorZero:sigmas) = reverse multiParams 
+                                let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
+                                let lkl = logLikelihood optTree
+                                writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
+                                writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
+                                writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas) ++"\n"
+                                return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigmas) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                        return ans
 {--                (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
                                                                 let interintra = head $ drop 3 $ words params
                                                                 let pAln = pAlignment a
@@ -261,9 +336,8 @@ normalise list = map ( / total) list where
                  total = foldl' (+) 0.0 list
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
-optParamsAndBL = optParamsAndBLIO --model tree params priors lower upper cutoff = optWithBSIO' [] cutoff (0,0) Nothing lower upper priors model (dummyTree tree) params                                                            
-optParamsAndBLIO model tree params priors lower upper cutoff = optWithBSIO' bobyqa [] cutoff (0,0) Nothing (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
-
+optBSParamsAndBLIO numBSParam mapping model tree params priors lower upper cutoff = optWithBSIO' bobyqa [] cutoff numBSParam mapping (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
+optParamsAndBLIO = optBSParamsAndBLIO (0,0) Nothing
 trim = f . f where 
    f = reverse . dropWhile isSpace
 clean = clean' . trim where
