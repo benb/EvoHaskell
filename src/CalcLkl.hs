@@ -23,88 +23,100 @@ import Phylo.NeXML
 import Phylo.NLOpt
 import Phylo.OpenBLAS as BLAS
 import Phylo.OptOutput
+import System.Exit (exitSuccess,exitFailure)
 
 data Flag = JobName String | PerBranch String | NumCats String | AlignmentFile String | TreeFile String | Alpha String | Sigma String | Opt | OptAlpha | PriorZero String | OptThmm | OptThmmP | OptThmm2 String | OptSim1 | OptSim2 String | OptSim0 String | Seed String | ThmmStochmap String | NoOpt 
         deriving (Show,Eq,Ord)
-options = [ Option ['a'] ["alignment"] (ReqArg AlignmentFile "FILE") "Alignment",
-            Option ['t'] ["tree"] (ReqArg TreeFile "FILE") "Tree",
-            Option ['j'] ["job-name"] (ReqArg JobName "PREFIX") "Job Name",
-            Option ['s'] ["seed"] (ReqArg Seed "INTEGER") "Seed",
-            Option [] ["num-cats"] (ReqArg NumCats "NUMGAMMACATS") "Number of Gamma Rate Categories",
-            Option ['g'] ["gamma"] (ReqArg Alpha "DOUBLE") "Use Gamma Model" ,
-            Option ['S'] ["sigma"] (ReqArg Sigma "DOUBLE") "Use Switching THMM", 
-            Option ['z'] ["prior-zero"] (ReqArg PriorZero "DOUBLE") "Set Prior for zero rate in THMM",
-            Option ['o'] ["opt"] (NoArg Opt) "Optimise Model",
-            Option [] ["per-branch"] (ReqArg PerBranch "splits") "Per-branch sigma"]
+options = [ Option ['a'] ["alignment"] (ReqArg (\arg opt -> return opt {optAln=Just arg})   "FILE") "Alignment",
+            Option ['t'] ["tree"] (ReqArg (\a o -> return o {optTree=Just a}) "FILE") "Tree",
+            Option ['j'] ["job-name"] (ReqArg (\a o -> return o {optJobName=Just a}) "PREFIX") "Job Name",
+            Option ['s'] ["seed"] (ReqArg (\a o -> return o {optSeed = Just $ read a})  "INTEGER") "Seed",
+            Option [] ["num-cats"] (ReqArg (\a o -> return o {optNumCats=read a}) "NUMGAMMACATS") "Number of Gamma Rate Categories",
+            Option ['g'] ["gamma"] (ReqArg (\a o -> return o {optAlpha=read a}) "DOUBLE") "Use Gamma Model" ,
+            Option ['S'] ["sigma"] (ReqArg (\a o -> return o {optSigma=Just $ read a}) "DOUBLE") "Use Switching THMM", 
+            Option ['z'] ["prior-zero"] (ReqArg (\a o -> return o {optPriorZero=read a}) "DOUBLE") "Set Prior for zero rate in THMM",
+            Option ['o'] ["opt"] (NoArg (\o -> return o {optOpt=True})) "Optimise Model",
+            Option [] ["per-branch"] (ReqArg (\a o -> return o {optPerBranch=Just a}) "splits") "Per-branch sigma"]
+
+
+data Options = Options  {
+        optAln  :: Maybe String,
+        optTree :: Maybe String,
+        optJobName :: Maybe String,
+        optNumCats :: Int,
+        optSeed :: Maybe Int,
+        optOpt :: Bool,
+        optSigma :: Maybe Double,
+        optPriorZero :: Double,
+        optAlpha :: Double,
+        optPerBranch :: Maybe String
+} deriving Show
+
+defaultOptions = Options{
+        optAln=Nothing,
+        optTree=Nothing,
+        optJobName=Nothing,
+        optNumCats=4,
+        optSeed=Nothing,
+        optOpt=False,
+        optSigma=Nothing,
+        optPriorZero=0.05,
+        optAlpha=1.0,
+        optPerBranch=Nothing
+}
 
 wagSX = ((\_->wagS),0)
 
 wagPiF = piX wagPi
 piX piF = ((\_->piF),0)
 
-
-isGamma flags = ((/=Nothing) $ find alpha flags) && ((==Nothing) $ find sigma flags) where
-               alpha (Alpha x) = True
-               alpha _ = False
-               sigma (Sigma x) = True
-               sigma _ = False
-                
-isThmm flags = findX alpha flags && findX sigma flags where
-               findX a b = (/=Nothing) $ find a b
-               alpha (Alpha x) = True
-               alpha _ = False
-               sigma (Sigma x) = True
-               sigma _ = False
-
-                
-
-getSigma ((Sigma x):xs) = read x
-getSigma (x:xs) = getSigma xs
-getSigma [] = error "No sigma"
-
-getAlpha ((Alpha x):xs) = read x
-getAlpha (x:xs) = getAlpha xs
-getAlpha [] = error "No alpha"
-
-getPriorZero ((PriorZero x):xs) = read x
-getPriorZero (x:xs) = getPriorZero xs
-getPriorZero [] = 0.05
-
-
-getMapping t ((PerBranch x):xs) = getMapping' t x
-getMapping t (x:xs) = getMapping t xs
-getMapping t [] = ((0,0),Nothing)
-
-getMapping' t spl = ((1,(length goodNodes)+1),Just $ makeMapping (allIn goodNodes) t) where
+getMapping t spl = ((1,(length goodNodes)+1),Just $ makeMapping (allIn goodNodes) t) where
              goodNodes = map (splitBy ',') $ splitBy ' ' spl
 
-getJobName ((JobName x):xs) = x
-getJobName (x:xs) = getJobName xs
-getJobName [] = error "Need to specify job name with -j"
+printHelp' exit opt = do putStrLn $ usageInfo header options
+                         putStrLn example
+                         exit where
+                            header = unlines ["AmpliPhy: Optimise THMM and Gamma models"]
+                            example = unlines []
+
+printHelp = printHelp' exitSuccess
+printHelpError = printHelp' exitFailure
+
 
 main = do args <- getArgs
           BLAS.set_num_threads 1
-          (aln,tree,stdGen,remainOpts) <- case getOpt Permute options args of 
-                         (((AlignmentFile aln):(TreeFile tre):(Seed seed):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
-                                                                                           tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                                           let stdGen = mkStdGen $ read seed
-                                                                                           return (aln,tree,stdGen,xs)
-                         (((AlignmentFile aln):(TreeFile tre):xs),[],[]) -> do aln <- parseAlignmentFile parseUniversal aln
-                                                                               tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                               stdGen <- getStdGen
-                                                                               return (aln,tree,stdGen,xs)
-                         (((TreeFile tre):(Seed seed):xs),[],[]) -> do tree <- (liftM readBiNewickTree) (readFile tre)
-                                                                       let stdGen = mkStdGen $ read seed
-                                                                       return (Nothing,tree,stdGen,xs)
-                         (_,_,msgs) -> error $ concat msgs
-          let (cats,remainOpts') = case remainOpts of 
-                (NumCats n):rem -> (read n,rem)
-                rem -> (4,rem)
-          output <- case (aln,tree,(sort remainOpts')) of 
-                (Just a,Right t,[])-> return $ Just $ "WAG lkl:" ++ (show $ quickLkl a t wagPi wagS)
-                (Just a,Right t,other) | isGamma other -> do let shouldOpt = (/=Nothing) $ find (==Opt) other
-                                                             let jobName = getJobName other
-                                                             putStrLn $ "Job Name: " ++ jobName
+          let ( actions, nonOpts, msgs ) = getOpt Permute options args
+          opts <- foldl (>>=) (return defaultOptions) actions   
+          let helpOutput="HELP"
+          let Options {
+                  optAln=alnMaybe,
+                  optTree=treeMaybe,
+                  optJobName=jobNameMaybe,
+                  optNumCats=cats,
+                  optSeed=seedMaybe,
+                  optOpt=optFlag,
+                  optSigma=sigmaMaybe,
+                  optPriorZero=priorZero',
+                  optAlpha=alpha',
+                  optPerBranch=mappingMaybe
+          } = opts
+          aln <- case alnMaybe of
+                Just a  -> parseAlignmentFile parseUniversal a
+                Nothing -> do putStrLn "Please specify an alignment"
+                              printHelpError opts
+          tree <- case treeMaybe of
+                Just a  -> (liftM readBiNewickTree) (readFile a)
+                Nothing -> do putStrLn "Please specify a tree" 
+                              printHelpError opts
+          stdGen <- case seedMaybe of 
+                Just a  -> return $ mkStdGen a
+                Nothing -> getStdGen
+          jobName <- case jobNameMaybe of 
+                Just a  -> return a
+                Nothing -> do putStrLn "Please specify a job name"
+                              printHelpError opts
+          output <- case (aln,tree,sigmaMaybe) of 
+                (Just a,Right t,Nothing) ->               do let shouldOpt = optFlag
                                                              (optTree,[alpha]) <- case shouldOpt of 
                                                                                        True ->   optWithOutput progress
                                                                                        False ->  return (addModelNNode t2 m' (flatPriors cats) pi',[alpha']) where
@@ -112,24 +124,20 @@ main = do args <- getArgs
                                                              let lkl = logLikelihood optTree
                                                              writeFile (jobName ++ "-out.tre") (show optTree)
                                                              writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
-                                                             return $ Just $ "Opt Alpha: " ++ (show alpha) ++ " " ++ (show lkl) where
-                                                                 alpha' = getAlpha other
+                                                             return $ Just $ "Gamma: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                                  t2 = structDataN 1 AminoAcid (pAlignment a) t
                                                                  piF = fromList $ safeScaledAAFrequencies a
                                                                  model = gammaModel cats wagSX $ piX piF
                                                                  progress = optParamsAndBLIO model t2 [alpha'] (flatPriors cats) [Just 0.001] [Nothing] 0.01
-                (Just a,Right t,other) | isThmm other -> do 
-                        let priorZero' = getPriorZero other
-                        let alpha' = getAlpha other
-                        let sigma' = getSigma other
+                (Just a,Right t,Just sigma') -> do 
                         let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                             
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
-                        let (numBSParams,mapping) = getMapping t2 other
+                        let (numBSParams,mapping) = case mappingMaybe of
+                                Nothing -> ((0,0),Nothing)
+                                Just s  -> getMapping t2 s
                         let model = thmmModel (cats+1) wagSX (piX piF)
                         let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
-                        let shouldOpt = numBSParams /= (0,0) || ((/=Nothing) $ find (==Opt) other) --always opt if numBSParams /= 0
-                        let jobName = getJobName other
-                        putStrLn $ "Job Name: " ++ jobName
+                        let shouldOpt = numBSParams /= (0,0) || optFlag --always opt if numBSParams /= 0
                         (optTree',[priorZero,alpha,sigma]) <- case shouldOpt of 
                                                                 True -> optWithOutput progress
                                                                 False -> return (addModelNNode t2 m' [1.0] pi',[priorZero',alpha',sigma']) where
@@ -236,7 +244,7 @@ main = do args <- getArgs
                                                          let lMat = case interintra of 
                                                                    "inter" -> interLMat (cats+1) 20
                                                                    "intra" -> intraLMat (cats+1) 20
-                                                         putStrLn $  "Opt Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
+                                                         putStrLn $  "Thmm: " ++ (show alpha) ++ " " ++ (joinWith " " $ sigma) ++ " " ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                                                          putStrLn $ posteriorTipsCSV (cats+1) (pAlignment a) optTree'
                                                          --calculateAndWrite nSite nState nBranch nProc nCols lMat multiplicites sitemap partials qset sitelikes pi_i branchLengths mixProbs stdout
                                                          return Nothing where

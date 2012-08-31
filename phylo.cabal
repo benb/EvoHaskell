@@ -18,7 +18,7 @@ Build-Type:     Simple
 --Executable seqcat
 --        Main-Is: SeqCat.hs
 --        HS-Source-Dirs: src
-Executable veriphy
+Executable ampliphy
         C-sources: src/Phylo/nlopt_c.c
         Extensions: ForeignFunctionInterface
         Main-Is: CalcLkl.hs
