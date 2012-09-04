@@ -3,7 +3,7 @@ module Phylo.OpenBLAS where
 import Foreign
 import Foreign.C.Types
 
-foreign import ccall safe "goto_set_num_threads" 
+foreign import ccall safe "openblas_set_num_threads" 
         c_set_num_threads :: CInt -> IO ()
 
 set_num_threads :: Int -> IO ()

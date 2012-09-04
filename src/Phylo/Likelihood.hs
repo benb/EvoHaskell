@@ -1,8 +1,8 @@
 {-# Language ScopedTypeVariables,CPP #-}
 module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        DNode(DLeaf,DINode,DTree),PatternAlignment(PatternAlignment),addModelFx,structDataN
-       ,mapBack,gamma,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds,getBL
-       ,gammaModel,annotateTreeWith,flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
+       ,mapBack,gamma,toPBELengths,getQMat,rawlikelihoods,getPi,getPriors,toPBEList,getPartialBranchEnds,getBL,getBL'
+       ,gammaModel,annotateTreeWith,annotateTreeWith',flatPriors,thmmModel,optBLDFull0,SeqDataType(AminoAcid,Nucleotide),gammaModelQ,thmmModelQ
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
@@ -97,6 +97,14 @@ cachedBranchModel initDist bm = let cached = (bm initDist) in
 cachedBranchModelTree (DTree l m r pLs pC priors pis) = DTree (cachedBranchModelTree l) (cachedBranchModelTree m) (cachedBranchModelTree r) pLs pC priors pis
 cachedBranchModelTree (DINode l r bl model pl) = DINode (cachedBranchModelTree l) (cachedBranchModelTree r) bl (map (cachedBranchModel bl) model) pl
 cachedBranchModelTree (DLeaf name dist seq partial model pl) = DLeaf name dist seq partial (map (cachedBranchModel dist) model) pl
+
+
+--check whether there are additional ``pseudo-branch-lengths'' - assume each node has the same number of bls
+hasMultipleBL (DTree l m r _ _ _ _) = (hasMultipleBL l) || (hasMultipleBL m) || (hasMultipleBL r)
+hasMultipleBL (DINode l r (x1:x2:xs) _ _ ) = True
+hasMultipleBL (DINode l r (x1:xs) _ _ ) = False
+hasMultipleBL (DLeaf _ (x1:x2:xs) _ _ _ _) = True
+hasMultipleBL (DLeaf _ (x1:xs) _ _ _ _) = False
 
 posteriorTipsCSVX' :: PatternAlignment ->  [(Int,String,DNode,[Double])] -> String
 posteriorTipsCSVX' (PatternAlignment names seqs _ _ _)  list = intercalate "\n" $ map (\(x,x',y,z) -> name ++ "," ++  (show x) ++ "," ++ (show x') ++"," ++ [z]  ++"," ++ (intercalate "," (map show y))) $ zip4 [0..] realseqpos (transpose post) alignedseq where
@@ -813,7 +821,7 @@ thmmQ numCat pi s priors alpha sigma = (matDr `kronecker` matM) `add` (matG `kro
 
 thmmPerBranch :: Int -> Vector Double -> Matrix Double -> [Double] -> Double -> [Double] -> (Matrix Double,Matrix Double)
 thmmPerBranch numCat pi s priors alpha [branchLength,sigma] = thmm numCat pi s priors alpha sigma [branchLength]
-thmmPerBranch numCat pi s priors alpha paramList | mytrace ("thmmpb " ++ (show paramList)) False = undefined
+thmmPerBranch numCat pi s priors alpha paramList | trace ("thmmpb " ++ (show paramList)) False = undefined
 
 
 loggedFuncGeneric :: (Show a) => (a->b) -> (a->b)
@@ -867,7 +875,7 @@ getFuncT1A' priors mapping (paramsPerBranch,paramCats) model tree params = newtr
                 t2 = setBLMapped 1 tree getParamF 
         perBranchParams = take paramCats $ splitLists paramsPerBranch params
         params' = drop (paramsPerBranch * paramCats) params
-        getParamF node = (perBranchParams !! (mapping node))
+        getParamF node = perBranchParams !! (mapping node)
 
 --getParamsT1 params tree = params
 
@@ -988,7 +996,10 @@ optWithBSIO' method iterations cutoff numBSParam mapping stepSize limitStepSize 
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
                 list -> (tree',params',BL) : optWithBSIO' method ((lkl,BL):list) cutoff numBSParam mapping stepSize limitStepSize lower upper priors model tree' startParams where -- Opt Params
                                 startTree = fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree startParams                                            
-                                tree' = optBLDFull0 startTree                                       
+                                tree'' = optBLDFull0 startTree                                       
+                                tree' = case (mapping,hasMultipleBL tree'') of 
+                                        (Nothing,True)  -> optBLD tree'' -- optimise ``pseudo-branch-lengths'' if present
+                                        _ -> tree''
                                 params' = drop ((fst numBSParam) * (snd numBSParam)) startParams
                                 lkl = logLikelihood $ fst $ getFuncT1A priors (fromJust mapping) numBSParam model tree' startParams
      --incrementStepSize ss = map (\(x,y) -> max x y) $ zip limitStepSize $ map (/10) ss

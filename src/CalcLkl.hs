@@ -36,7 +36,8 @@ options = [ Option ['a'] ["alignment"] (ReqArg (\arg opt -> return opt {optAln=J
             Option ['S'] ["sigma"] (ReqArg (\a o -> return o {optSigma=Just $ read a}) "DOUBLE") "Use Switching THMM", 
             Option ['z'] ["prior-zero"] (ReqArg (\a o -> return o {optPriorZero=read a}) "DOUBLE") "Set Prior for zero rate in THMM",
             Option ['o'] ["opt"] (NoArg (\o -> return o {optOpt=True})) "Optimise Model",
-            Option [] ["per-branch"] (ReqArg (\a o -> return o {optPerBranch=Just a}) "splits") "Per-branch sigma"]
+            Option [] ["per-branch"] (ReqArg (\a o -> return o {optPerBranch=Just a}) "splits") "Per-branch sigma",
+            Option [] ["all-branch"] (NoArg (\o -> return o {optAllBranch=True})) "Sigma for each branch"]
 
 
 data Options = Options  {
@@ -49,7 +50,8 @@ data Options = Options  {
         optSigma :: Maybe Double,
         optPriorZero :: Double,
         optAlpha :: Double,
-        optPerBranch :: Maybe String
+        optPerBranch :: Maybe String,
+        optAllBranch :: Bool
 } deriving Show
 
 defaultOptions = Options{
@@ -62,7 +64,8 @@ defaultOptions = Options{
         optSigma=Nothing,
         optPriorZero=0.05,
         optAlpha=1.0,
-        optPerBranch=Nothing
+        optPerBranch=Nothing,
+        optAllBranch=False
 }
 
 wagSX = ((\_->wagS),0)
@@ -98,7 +101,8 @@ main = do args <- getArgs
                   optSigma=sigmaMaybe,
                   optPriorZero=priorZero',
                   optAlpha=alpha',
-                  optPerBranch=mappingMaybe
+                  optPerBranch=mappingMaybe,
+                  optAllBranch=optAllSwitch
           } = opts
           aln <- case alnMaybe of
                 Just a  -> parseAlignmentFile parseUniversal a
@@ -142,18 +146,30 @@ main = do args <- getArgs
                                                                 True -> optWithOutput progress
                                                                 False -> return (addModelNNode t2 m' [1.0] pi',[priorZero',alpha',sigma']) where
                                                                            (m',pi') = model [priorZero',alpha',sigma']
-                        ans <- if numBSParams == (0,0)
-                            then 
-                             do let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
+                        ans <- case (numBSParams,optAllSwitch) of
+                             (_,True) -> do --every branch has a sigma
+                                let model = thmmPerBranchModel (cats+1) wagS piF
+                                let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
+                                (optTree2,multiParams) <- optWithOutput progress
+                                let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
+                                writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
+                                writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
+                                let sigmas = map (!!1) $ getBL' optTree2 []
+                                writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas) ++"\n"
+                                print multiParams
+                                print optTree2
+                                return $ Just "OK"
+                             ((0,0),False) -> do --just one sigma
+                                let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
                                 let lkl = logLikelihood optTree
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++"\n"
                                 writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
                                 writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigma) ++ "\n"
                                 return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
-                            else
-                             do let model = thmmPerBranchModel (cats+1) wagS piF
+                             (_,False) -> do  --hybrid
+                                let model = thmmPerBranchModel (cats+1) wagS piF
                                 let (a,b) = numBSParams
-                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)++[priorZero,alpha]) [1.0] ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
+                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) [1.0] ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let (alpha:priorZero:sigmas) = reverse multiParams 
                                 let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
