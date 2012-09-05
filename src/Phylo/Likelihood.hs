@@ -70,13 +70,14 @@ allPLC [] [] = []
 
 
 sumLikelihoods :: [Int] -> [Double] -> Double
-sumLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts) likelihoods where
-                                        foldF :: (Double,Double) -> Double -> Double 
-                                        foldF (i,y) x = x + (i * (log y))
-                                        
+sumLikelihoods counts likelihoods = sumLogLikelihoods counts (map log likelihoods)
 
+sumLogLikelihoods counts likelihoods = foldr foldF 0 $ zip (map fromIntegral counts) likelihoods where
+                                        foldF :: (Double,Double) -> Double -> Double 
+                                        foldF (i,y) x = x + (i * (y))
+                                        
 logLikelihoodModel :: DNode -> Double
-logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLikelihoods pC $ likelihoods root where
+logLikelihoodModel root@(DTree _ _ _ _ pC _ _) = sumLogLikelihoods pC $ logLikelihoods root where
 
 concatNewLine :: [[String]] -> String
 concatNewLine = intercalate "\n" . map (intercalate "\n")
@@ -174,6 +175,18 @@ likelihoods :: DNode -> [Double]
 likelihoods t@(DTree _ _ _ pLs _ priors pis) = map summarise likelihoodss where
                                                 summarise lkl = sum $ zipWith (*) lkl priors
                                                 likelihoodss = transpose $ rawlikelihoods t
+
+logLikelihoods :: DNode -> [Double]
+logLikelihoods t@(DTree _ _ _ pLs _ priors pis) = map summarise likelihoodss where
+                                                isNegInf x = isInfinite x && x < 0
+                                                logAdd x y | isNegInf x = y
+                                                logAdd x y | isNegInf y = x
+                                                logAdd x y = (max x y) + log1p(exp (-(abs $ x - y))) 
+                                                sumLog (x:[]) = x
+                                                sumLog (x:xs) = logAdd x $ sumLog xs
+                                                summarise lkl = sumLog $ zipWith (+) (map log lkl) (map log priors)
+                                                likelihoodss = transpose $ rawlikelihoods t
+                                                       
 
 -- likelihoods per pattern, indexed by model then site
 rawlikelihoods :: DNode -> [[Double]] 
@@ -276,32 +289,35 @@ removeModel (DLeaf name dist seq partial _ _) = NLeaf name dist seq partial
 
 
 
-structDataN :: Int -> SeqDataType -> PatternAlignment -> Node -> NNode
+structDataN :: Double -> Int -> SeqDataType -> PatternAlignment -> Node -> NNode
 
-structDataN hiddenClasses seqDataType pAln node = structDataN' hiddenClasses seqDataType pAln (transpose $ patterns pAln) node 
-structDataN' hiddenClasses seqDataType (PatternAlignment names seqs columns patterns counts) transPat (Leaf name dist) = ans where
+structDataN scale hiddenClasses seqDataType pAln node = structDataN' scale hiddenClasses seqDataType pAln (transpose $ patterns pAln) node 
+structDataN' scale hiddenClasses seqDataType (PatternAlignment names seqs columns patterns counts) transPat (Leaf name dist) = ans where
                                                                                                                           partial = getPartial hiddenClasses seqDataType sequence 
                                                                                                                           sequence = snd $ fromJust $ find (\(n,_) -> n==name) $ zip names transPat 
                                                                                                                           ans = NLeaf name [dist] sequence partial 
 
 
-structDataN' hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right [dist] where
-                                                                              left = structDataN' hiddenClasses seqDataType pA transPat c1
-                                                                              right = structDataN' hiddenClasses seqDataType pA transPat c2
+structDataN' scale hiddenClasses seqDataType pA transPat (INode c1 c2 dist) = NINode left right [dist] where
+                                                                              left = structDataN' scale hiddenClasses seqDataType pA transPat c1
+                                                                              right = structDataN' scale hiddenClasses seqDataType pA transPat c2
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = NTree left middle right $ counts pA where
-                                                                                  left = structDataN' hiddenClasses seqDataType pA transPat l
-                                                                                  right = structDataN' hiddenClasses seqDataType pA transPat r
-                                                                                  middle = structDataN' hiddenClasses seqDataType pA transPat $ addDist dist c2
+structDataN' scale hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2 ) = NTree left middle right $ counts pA where
+                                                                                  left = structDataN' scale hiddenClasses seqDataType pA transPat l
+                                                                                  right = structDataN' scale hiddenClasses seqDataType pA transPat r
+                                                                                  middle = structDataN' scale hiddenClasses seqDataType pA transPat $ addDist dist c2
                                                                                   addDist d (Leaf name dist) = Leaf name (dist+d)
                                                                                   addDist d (INode l r dist) = INode l r (dist+d)
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree c2 (INode l r dist)) = structDataN' hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2)
+structDataN' scale hiddenClasses seqDataType pA transPat (Tree c2 (INode l r dist)) = structDataN' scale hiddenClasses seqDataType pA transPat (Tree (INode l r dist) c2)
 
-structDataN' hiddenClasses seqDataType pA transPat (Tree (Leaf name dist) (Leaf name2 dist2))  = error "Can't handle tree with only 2 leaves"
+structDataN' scale hiddenClasses seqDataType pA transPat (Tree (Leaf name dist) (Leaf name2 dist2))  = error "Can't handle tree with only 2 leaves"
 
 
-structData hiddenClasses seqDataType pAln model transPat node = addModel (structDataN hiddenClasses seqDataType pAln node) model 
+structDataScaled scale hiddenClasses seqDataType pAln model transPat node = addModel (structDataN scale' hiddenClasses seqDataType pAln node) model  where
+                                                                                scale' = scale / (fromIntegral $ length $ leaves node)
+
+structData = structDataScaled 1.0
 
 
 
@@ -744,7 +760,7 @@ setBLflat' i node counts bls = setBLX' i (listpartition counts bls []) node
 
 zeroQMat size = diag $ constant 0.0 size
 
-qdLkl numCat priors dataType aln tree modelF params = logLikelihood $ addModelFx (structDataN numCat dataType (pAlignment aln) tree) (modelF params) priors
+qdLkl numCat priors dataType aln tree modelF params = logLikelihood $ addModelFx (structDataN 1.0 numCat dataType (pAlignment aln) tree) (modelF params) priors
 
 type ModelF = [Double] -> ([BranchModel],[Vector Double])
 basicModel :: Matrix Double -> Vector Double -> ModelF
@@ -1212,4 +1228,5 @@ getSensibleParams (_,0,_,_)=[]
 
 
 whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
+
 

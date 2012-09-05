@@ -129,12 +129,12 @@ main = do args <- getArgs
                                                              writeFile (jobName ++ "-out.tre") (show optTree)
                                                              writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
                                                              return $ Just $ "Gamma: " ++ (show alpha) ++ " " ++ (show lkl) where
-                                                                 t2 = structDataN 1 AminoAcid (pAlignment a) t
+                                                                 t2 = structDataN 1.0 1 AminoAcid (pAlignment a) t
                                                                  piF = fromList $ safeScaledAAFrequencies a
                                                                  model = gammaModel cats wagSX $ piX piF
                                                                  progress = optParamsAndBLIO model t2 [alpha'] (flatPriors cats) [Just 0.001] [Nothing] 0.01
                 (Just a,Right t,Just sigma') -> do 
-                        let t2 = structDataN (cats+1) AminoAcid (pAlignment a) t                                                                                                             
+                        let t2 = structDataN 1.0 (cats+1) AminoAcid (pAlignment a) t                                                                                                             
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
                         let (numBSParams,mapping) = case mappingMaybe of
                                 Nothing -> ((0,0),Nothing)

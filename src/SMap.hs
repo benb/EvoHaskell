@@ -334,16 +334,16 @@ main = do args <- getArgs
                                            Ras a -> (gammaModel cats sMat pi,(a:extraParams), optGammaModel method cats pi sMat extraLowerParams extraUpperParams)
                                            Thmm a b c -> (thmmModel (cats+1) sMat pi,(a:b:c:extraParams), optThmmModel method 1 cats pi sMat extraLowerParams extraUpperParams)
           let (t2',priors,nClasses) = case modelParams of 
-                                           Basic -> (addModelFx (structDataN 1 dataType pAln t) (modelF initparams) [1.0],[1.0],1)
-                                           Thmm _ _ _ -> (addModelFx (structDataN (cats+1) dataType (pAln) t) (modelF initparams) [1.0],[1.0],(cats+1))
-                                           Ras _ -> (addModelFx (structDataN 1 dataType (pAln) t) (modelF initparams) (flatPriors cats),flatPriors cats,1)
+                                           Basic -> (addModelFx (structDataN 1.0 1 dataType pAln t) (modelF initparams) [1.0],[1.0],1)
+                                           Thmm _ _ _ -> (addModelFx (structDataN 1.0 (cats+1) dataType (pAln) t) (modelF initparams) [1.0],[1.0],(cats+1))
+                                           Ras _ -> (addModelFx (structDataN 1.0 1 dataType (pAln) t) (modelF initparams) (flatPriors cats),flatPriors cats,1)
           logger $ show (intraLMat nClasses alphabetSize)
           case simulateOnly of 
                         Just alnLength -> do let emptyAlignment = quickListAlignment (Phylo.Tree.names t) [] 
                                              let emptyTree= case modelParams of 
-                                                                   Basic      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
-                                                                   Thmm a b c -> addModelFx (structDataN (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
-                                                                   Ras a      -> addModelFx (structDataN 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors cats)
+                                                                   Basic      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
+                                                                   Thmm a b c -> addModelFx (structDataN 1.0 (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
+                                                                   Ras a      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors cats)
                                              mapM putStr $ toFasta $ makeSimulatedAlignment dataType stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
@@ -775,7 +775,7 @@ optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSPa
         upper = [Just 0.99,Just 200.0,Just 500.0] ++ upper'                                                                                                           
         myModel = thmmModel (cats+1) s pi
 
-newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN classes dataType (pAln) origTree) model priors,pAln) where
+newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN 1.0 classes dataType (pAln) origTree) model priors,pAln) where
         aln = makeSimulatedAlignmentWithGaps dataType stdGen tree origAln
         pAln = sane $ pAlignment aln
 
