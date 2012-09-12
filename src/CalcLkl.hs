@@ -134,22 +134,25 @@ main = do args <- getArgs
                                                                  model = gammaModel cats wagSX $ piX piF
                                                                  progress = optParamsAndBLIO model t2 [alpha'] (flatPriors cats) [Just 0.001] [Nothing] 0.01
                 (Just a,Right t,Just sigma') -> do 
-                        let t2 = structDataN 1.0 (cats+1) AminoAcid (pAlignment a) t                                                                                                             
+                        let scaleT = 1e300
+                        let (scale,priorScale) = getScales t scaleT
+                        let priors = [1.0/priorScale]
+                        let t2 = structDataN scale (cats+1) AminoAcid (pAlignment a) t                                                                                                             
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
                         let (numBSParams,mapping) = case mappingMaybe of
                                 Nothing -> ((0,0),Nothing)
                                 Just s  -> getMapping t2 s
                         let model = thmmModel (cats+1) wagSX (piX piF)
-                        let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] [1.0] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] priors [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
                         let shouldOpt = numBSParams /= (0,0) || optFlag --always opt if numBSParams /= 0
                         (optTree',[priorZero,alpha,sigma]) <- case shouldOpt of 
                                                                 True -> optWithOutput progress
-                                                                False -> return (addModelNNode t2 m' [1.0] pi',[priorZero',alpha',sigma']) where
+                                                                False -> return (addModelNNode t2 m' priors pi',[priorZero',alpha',sigma']) where
                                                                            (m',pi') = model [priorZero',alpha',sigma']
                         ans <- case (numBSParams,optAllSwitch) of
                              (_,True) -> do --every branch has a sigma
                                 let model = thmmPerBranchModel (cats+1) wagS piF
-                                let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] [1.0] [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
+                                let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] priors [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
@@ -169,7 +172,7 @@ main = do args <- getArgs
                              (_,False) -> do  --hybrid
                                 let model = thmmPerBranchModel (cats+1) wagS piF
                                 let (a,b) = numBSParams
-                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) [1.0] ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
+                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) priors ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let (alpha:priorZero:sigmas) = reverse multiParams 
                                 let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
@@ -407,3 +410,8 @@ stochmapOut (condE',priorE') mapping priors f = do
                                                  fmtBranch2 (b:bs) ((cond,prior):xs) = ((show b) ++"\t" ++ (show $ total cond) ++ "\t" ++ (show $ total prior) ++ "\n") : (fmtBranch2 bs xs)
                                                  headerSite = "Site\tTotal_conditional_expectation\tTotal_prior_expectation\n"
                                                  remainderSite = fmtBranch2 [0..] $ zip condE'' priorE''
+
+getScales :: Node -> Double -> (Double,Double)
+getScales tree target = (x,x**n) where
+        n = fromIntegral $ length $ leaves tree
+        x = n `nthRootApprox` target 

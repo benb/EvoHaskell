@@ -6,7 +6,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
-       ,simpleModel,getSubBL,
+       ,simpleModel,getSubBL,nthRootApprox,nthRoot,
        quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped,whichModels,likelihoods,quickGamma') where
 import Phylo.Alignment
 import Phylo.Tree
@@ -293,7 +293,7 @@ structDataN :: Double -> Int -> SeqDataType -> PatternAlignment -> Node -> NNode
 
 structDataN scale hiddenClasses seqDataType pAln node = structDataN' scale hiddenClasses seqDataType pAln (transpose $ patterns pAln) node 
 structDataN' scale hiddenClasses seqDataType (PatternAlignment names seqs columns patterns counts) transPat (Leaf name dist) = ans where
-                                                                                                                          partial = getPartial hiddenClasses seqDataType sequence 
+                                                                                                                          partial = getPartial scale hiddenClasses seqDataType sequence 
                                                                                                                           sequence = snd $ fromJust $ find (\(n,_) -> n==name) $ zip names transPat 
                                                                                                                           ans = NLeaf name [dist] sequence partial 
 
@@ -314,8 +314,7 @@ structDataN' scale hiddenClasses seqDataType pA transPat (Tree c2 (INode l r dis
 structDataN' scale hiddenClasses seqDataType pA transPat (Tree (Leaf name dist) (Leaf name2 dist2))  = error "Can't handle tree with only 2 leaves"
 
 
-structDataScaled scale hiddenClasses seqDataType pAln model transPat node = addModel (structDataN scale' hiddenClasses seqDataType pAln node) model  where
-                                                                                scale' = scale / (fromIntegral $ length $ leaves node)
+structDataScaled scale hiddenClasses seqDataType pAln model transPat node = addModel (structDataN scale hiddenClasses seqDataType pAln node) model  where
 
 structData = structDataScaled 1.0
 
@@ -339,12 +338,12 @@ addModelNNode (NTree c1 c2 c3 pat) model priors pi = DTree left middle right myP
 data SeqDataType = AminoAcid | Nucleotide deriving Show
 -- produce the partial likelihood at the tips
 -- getPartial numHiddenStates dataType Sequence
-getPartial :: Int -> SeqDataType -> String -> Matrix Double
-getPartial a b c = trans $ fromRows $ getPartial' a b c
-getPartial' :: Int -> SeqDataType -> String -> [Vector Double]
-getPartial' _ _ [] = []
-getPartial' classes AminoAcid (x:xs) = (aaPartial classes x):(getPartial' classes AminoAcid xs)
-getPartial' classes Nucleotide (x:xs) = (nucPartial classes x):(getPartial' classes Nucleotide xs)
+getPartial :: Double -> Int -> SeqDataType -> String -> Matrix Double
+getPartial a b c d = traceShow a $ trans $ fromRows $ getPartial' a b c d
+getPartial' :: Double -> Int -> SeqDataType -> String -> [Vector Double]
+getPartial' _ _ _ [] = []
+getPartial' scale classes AminoAcid (x:xs) = (aaPartial scale classes x):(getPartial' scale classes AminoAcid xs)
+getPartial' scale classes Nucleotide (x:xs) = (nucPartial scale classes x):(getPartial' scale classes Nucleotide xs)
 
 numberedHash list = foldr (\(item,i) init -> HM.insert item i init) HM.empty $ zip list [0..]
 
@@ -355,9 +354,9 @@ nucOrder = ['T','C','A','G'] --as PAML
 nucOrderVec = DVec.fromList nucOrder
 nucOrderHash = numberedHash nucOrder
 
-nucPartial classes x | isGapChar x = buildVector (4*classes) (\i->1.0)
-                     | otherwise = case HM.lookup x nucOrderHash of 
-                                        Just index -> buildVector (4*classes) (\i -> if i`mod`4==index then 1.0 else 0.0)
+nucPartial scale classes x | isGapChar x = buildVector (4*classes) (\i->scale)
+                           | otherwise = case HM.lookup x nucOrderHash of 
+                                        Just index -> buildVector (4*classes) (\i -> if i`mod`4==index then scale else 0.0)
                                         Nothing -> error $ "character " ++ [x] ++ " is not a nucleotide or gap"
 
 
@@ -365,9 +364,9 @@ nucPartial classes x | isGapChar x = buildVector (4*classes) (\i->1.0)
 aaOrder = ['A','R','N','D','C','Q','E','G','H','I','L','K','M','F','P','S','T','W','Y','V']
 aaOrderVec = DVec.fromList aaOrder
 aaOrderHash = numberedHash aaOrder
-aaPartial classes x | isGapChar x = buildVector (20*classes) (\i->1.0) 
-                    | otherwise = case HM.lookup x aaOrderHash of 
-                                       Just index -> buildVector (20*classes) (\i -> if i`mod`20==index then 1.0 else 0.0) where
+aaPartial scale classes x | isGapChar x = buildVector (20*classes) (\i->scale) 
+                          | otherwise = case HM.lookup x aaOrderHash of 
+                                       Just index -> buildVector (20*classes) (\i -> if i`mod`20==index then scale else 0.0) where
                                        Nothing -> error $ "character " ++ [x] ++ " is not an amino acid or gap"
 
                                  
@@ -1229,4 +1228,14 @@ getSensibleParams (_,0,_,_)=[]
 
 whichModels t mapping = map mapping (nonRootNodes $ dummyTree t)
 
+nthRoot n x = fst $ until (uncurry(==)) (nthRootIter n x) (x,x/n)
+nthRootIter n x (_,x0) =   (x0,((n-1)*x0+x/x0**(n-1))/n)
+
+nthRootIters n x start = ans:(nthRootIters n x ans) where
+                ans = nthRootIter n x start
+
+nthRootApprox n x = getAns l where
+        l = nthRootIters n x (x,x/n)
+        getAns ((a,a'):(b,b'):z) | a==a' || b==b' || a==b' && b==a' = a
+        getAns (x:xs) = getAns xs
 
