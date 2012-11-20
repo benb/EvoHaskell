@@ -128,6 +128,7 @@ main = do args <- getArgs
                                                              let lkl = logLikelihood optTree
                                                              writeFile (jobName ++ "-out.tre") (show optTree)
                                                              writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
+                                                             writeFile (jobName ++ "-out.lkl") ((show lkl) ++ "\n")
                                                              return $ Just $ "Gamma: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                                  t2 = structDataN 1.0 1 AminoAcid (pAlignment a) t
                                                                  piF = fromList $ safeScaledAAFrequencies a
@@ -154,20 +155,22 @@ main = do args <- getArgs
                                 let model = thmmPerBranchModel (cats+1) wagS piF
                                 let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] priors [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
-                                let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
+                                let optTree = annotateTreeWithNumberSwitches priorScale AminoAcid optTree2
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
                                 writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
+                                writeFile (jobName ++ "-out.lkl") ((show $logLikelihood optTree2) ++ "\n")
                                 let sigmas = map (!!1) $ getBL' optTree2 []
                                 writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas) ++"\n"
                                 print multiParams
                                 print optTree2
                                 return $ Just "OK"
                              ((0,0),False) -> do --just one sigma
-                                let optTree = annotateTreeWithNumberSwitchesSigma AminoAcid sigma optTree'
+                                let optTree = annotateTreeWithNumberSwitchesSigma priorScale AminoAcid sigma optTree'
                                 let lkl = logLikelihood optTree
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++"\n"
                                 writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
                                 writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigma) ++ "\n"
+                                writeFile (jobName ++ "-out.lkl") ((show $logLikelihood optTree') ++ "\n")
                                 return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigma) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                              (_,False) -> do  --hybrid
                                 let model = thmmPerBranchModel (cats+1) wagS piF
@@ -175,11 +178,17 @@ main = do args <- getArgs
                                 let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) priors ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let (alpha:priorZero:sigmas) = reverse multiParams 
-                                let optTree = annotateTreeWithNumberSwitches AminoAcid optTree2
+                                {- sigmas is now reversed
+                                   internal convention is that for --per-branch="set1 set2"
+                                   sigmas = [sigma1,sigma2,sigma_background]
+                                   makes most sense to output [sigma_background,sigma1,sigma2] I think --}
+                                let sigmas' = ((head sigmas):(reverse $ tail sigmas))
+                                let optTree = annotateTreeWithNumberSwitches priorScale AminoAcid optTree2
                                 let lkl = logLikelihood optTree
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
                                 writeFile (jobName ++ "-switching-out.tre") $ (show $ getSubBL 2 optTree) ++ "\n"
-                                writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas) ++"\n"
+                                writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas') ++"\n"
+                                writeFile (jobName ++ "-out.lkl") ((show $logLikelihood optTree2) ++ "\n")
                                 return $ Just $ "Opt Thmm: " ++ (show alpha) ++ " " ++ (show sigmas) ++ " " ++ (show priorZero) ++ " " ++ (show lkl) ++ "\n" ++ (show optTree) 
                         return ans
 {--                (Just a,Right t,(ThmmStochmap params ):[])-> do let alpha:sigma:priorZero:[] = map read $ take 3 $ words params
@@ -327,6 +336,7 @@ main = do args <- getArgs
                Nothing -> return ()
 
 
+{-which of sets am I in (for split (l,r)? or (length sets) if I am not-}
 allInGeneric method sets (l,r) = case (findIndex (==True) $ map (method l r) sets) of
                                         Just a -> a
                                         Nothing -> other

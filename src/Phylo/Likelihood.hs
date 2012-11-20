@@ -339,7 +339,7 @@ data SeqDataType = AminoAcid | Nucleotide deriving Show
 -- produce the partial likelihood at the tips
 -- getPartial numHiddenStates dataType Sequence
 getPartial :: Double -> Int -> SeqDataType -> String -> Matrix Double
-getPartial a b c d = traceShow a $ trans $ fromRows $ getPartial' a b c d
+getPartial a b c d =  trans $ fromRows $ getPartial' a b c d
 getPartial' :: Double -> Int -> SeqDataType -> String -> [Vector Double]
 getPartial' _ _ _ [] = []
 getPartial' scale classes AminoAcid (x:xs) = (aaPartial scale classes x):(getPartial' scale classes AminoAcid xs)
@@ -1151,29 +1151,29 @@ annotateTreeWith' mapping n@(DINode l r bl models mats) = DINode (an l) (an r) (
 
 annotateTreeWith' mapping n@(DLeaf name bl seq tip models partial) = DLeaf name (bl ++ [(mapping [name])]) seq tip models partial
 
-annotateTreeWithNumberSwitchesSigma dt sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
-                                                                            an = annotateTreeWithNumberSwitchesSigma' dt sigma priors pis
+annotateTreeWithNumberSwitchesSigma scale dt sigma (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitchesSigma' scale dt sigma priors pis
 
-annotateTreeWithNumberSwitchesSigma' dt sigma priors pis (DINode l r (bl:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
-                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
-                                                                                        an = annotateTreeWithNumberSwitchesSigma' dt sigma priors pis
+annotateTreeWithNumberSwitchesSigma' scale dt sigma priors pis (DINode l r (bl:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL scale dt priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitchesSigma' scale dt sigma priors pis
 
-annotateTreeWithNumberSwitchesSigma' dt sigma priors pis (DLeaf name (bl:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
-                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
+annotateTreeWithNumberSwitchesSigma' scale dt sigma priors pis (DLeaf name (bl:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL scale dt priors pis models [bl,sigma]
 
-annotateTreeWithNumberSwitches dt (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
-                                                                            an = annotateTreeWithNumberSwitches' dt priors pis
-annotateTreeWithNumberSwitches' dt priors pis (DINode l r (bl:sigma:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
-                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
-                                                                                        an = annotateTreeWithNumberSwitches' dt priors pis
+annotateTreeWithNumberSwitches scale dt (DTree l m r models patcounts priors pis) = DTree (an l) (an m) (an r) models patcounts priors pis where
+                                                                            an = annotateTreeWithNumberSwitches' scale dt priors pis
+annotateTreeWithNumberSwitches' scale dt priors pis (DINode l r (bl:sigma:[]) models mats) = DINode (an l) (an r) [bl,sigma,switchbl] models mats where
+                                                                                        switchbl = calcSwitchBL scale dt priors pis models [bl,sigma]
+                                                                                        an = annotateTreeWithNumberSwitches' scale dt priors pis
 
-annotateTreeWithNumberSwitches' dt priors pis (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
-                                                                                        switchbl = calcSwitchBL dt priors pis models [bl,sigma]
+annotateTreeWithNumberSwitches' scale dt priors pis (DLeaf name (bl:sigma:[]) seq tip models partial) = DLeaf name [bl,sigma,switchbl] seq tip models partial where
+                                                                                        switchbl = calcSwitchBL scale dt priors pis models [bl,sigma]
 
 
-calcSwitchBL dt priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors switchingrates where
+calcSwitchBL scale dt priors pis models (bl:sigma:[]) = (*) bl $ sum $ zipWith (*) priors switchingrates where
                                                  mats = map (\x-> snd $ x [bl,sigma]) models
-                                                 switchingrates = map (switchingSum (dataSize dt)) $ zip pis mats 
+                                                 switchingrates = map (*scale) $ map (switchingSum (dataSize dt)) $ zip pis mats 
 
 switchingSum nc (pi,mat) = getSwitchingRate mat pi nc
 
