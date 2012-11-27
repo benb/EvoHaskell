@@ -162,7 +162,7 @@ main = do args <- getArgs
                                 let sigmas = map (!!1) $ getBL' optTree2 []
                                 writeFile (jobName ++ "-out.param") $ "alpha = " ++ (show alpha) ++ "\np_0 = " ++ (show priorZero) ++ "\nsigma = " ++ (show sigmas) ++"\n"
                                 print multiParams
-                                print optTree2
+                                print optTree
                                 return $ Just "OK"
                              ((0,0),False) -> do --just one sigma
                                 let optTree = annotateTreeWithNumberSwitchesSigma priorScale AminoAcid sigma optTree'

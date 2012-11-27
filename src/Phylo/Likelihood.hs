@@ -785,6 +785,17 @@ gammaModel numCat (sF,sN) (piF,piN) (alpha:xs) = (models,replicate numCat pi) wh
                                 s = sF (take sN xs)
                                 pi = piF (take piN (drop sN xs))
 
+zeroGammaModel numCat (sF,sN) (piF,piN) (priorZero:xs) = case priorZero of 
+                                                a | a > 0.0   -> zeroGammaModel' numCat (sF,sN) (piF,piN) (priorZero:xs)
+                                                  | otherwise -> gammaModel numCat (sF,sN) (piF,piN) xs
+
+zeroGammaModel' numCat (sF,sN) (piF,piN) (priorZero:xs) = (models,replicate (numCat+1) pi) where
+                                (models',_) = gammaModel numCat (sF,sN) (piF,piN) xs
+                                models = zeroMod:models'  
+                                zeroMod= (\x -> (zeroQMat piN,zeroQMat piN))
+                                s = sF (take sN xs)
+                                pi = piF (take piN (drop sN xs))
+
 gammaModelQ numCat (sF,sN) (piF,piN) (alpha:xs) = map (\r -> setRate r initMat pi) $ gamma numCat alpha where
                                 initMat = makeQ s pi
                                 s = sF (take sN xs)
