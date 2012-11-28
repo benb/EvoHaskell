@@ -34,7 +34,7 @@ options = [ Option ['a'] ["alignment"] (ReqArg (\arg opt -> return opt {optAln=J
             Option [] ["num-cats"] (ReqArg (\a o -> return o {optNumCats=read a}) "NUMGAMMACATS") "Number of Gamma Rate Categories",
             Option ['g'] ["gamma"] (ReqArg (\a o -> return o {optAlpha=read a}) "DOUBLE") "Use Gamma Model" ,
             Option ['S'] ["sigma"] (ReqArg (\a o -> return o {optSigma=Just $ read a}) "DOUBLE") "Use Switching THMM", 
-            Option ['z'] ["prior-zero"] (ReqArg (\a o -> return o {optPriorZero=read a}) "DOUBLE") "Set Prior for zero rate in THMM",
+            Option ['z'] ["prior-zero"] (ReqArg (\a o -> return o {optPriorZero=Just $ read a}) "DOUBLE") "Set Prior for zero rate in THMM",
             Option ['o'] ["opt"] (NoArg (\o -> return o {optOpt=True})) "Optimise Model",
             Option [] ["per-branch"] (ReqArg (\a o -> return o {optPerBranch=Just a}) "splits") "Per-branch sigma",
             Option [] ["all-branch"] (NoArg (\o -> return o {optAllBranch=True})) "Sigma for each branch"]
@@ -48,7 +48,7 @@ data Options = Options  {
         optSeed :: Maybe Int,
         optOpt :: Bool,
         optSigma :: Maybe Double,
-        optPriorZero :: Double,
+        optPriorZero :: Maybe Double,
         optAlpha :: Double,
         optPerBranch :: Maybe String,
         optAllBranch :: Bool
@@ -62,7 +62,7 @@ defaultOptions = Options{
         optSeed=Nothing,
         optOpt=False,
         optSigma=Nothing,
-        optPriorZero=0.05,
+        optPriorZero=Nothing,
         optAlpha=1.0,
         optPerBranch=Nothing,
         optAllBranch=False
@@ -99,11 +99,19 @@ main = do args <- getArgs
                   optSeed=seedMaybe,
                   optOpt=optFlag,
                   optSigma=sigmaMaybe,
-                  optPriorZero=priorZero',
+                  optPriorZero=priorZero'',
                   optAlpha=alpha',
                   optPerBranch=mappingMaybe,
                   optAllBranch=optAllSwitch
           } = opts
+          -- we always do the zero rate matrix in a THMM
+          -- but with no switching, if the user specifies -z
+          -- we should include a zero rate matrix
+          -- otherwise, don't (just do a gamma model)
+          let (priorZero',doZeroGamma) = case priorZero'' of  
+                Nothing -> (0.05,False)
+                Just x  -> (x,True)
+          print (priorZero',doZeroGamma)
           aln <- case alnMaybe of
                 Just a  -> parseAlignmentFile parseUniversal a
                 Nothing -> do putStrLn "Please specify an alignment"
@@ -121,10 +129,15 @@ main = do args <- getArgs
                               printHelpError opts
           output <- case (aln,tree,sigmaMaybe) of 
                 (Just a,Right t,Nothing) ->               do let shouldOpt = optFlag
-                                                             (optTree,[alpha]) <- case shouldOpt of 
+                                                             print shouldOpt
+                                                             (optTree,params) <- case shouldOpt of 
                                                                                        True ->   optWithOutput progress
-                                                                                       False ->  return (addModelNNode t2 m' (flatPriors cats) pi',[alpha']) where
-                                                                                                     (m',pi') = model [alpha']
+                                                                                       False ->  return (addModelNNode t2 m' (flatPriors cats) pi',initParams) where
+                                                                                                     (m',pi') = model initParams
+                                                             let [priorZero,alpha] = case doZeroGamma of
+                                                                        False -> [0.0,(head params)]
+                                                                        True  -> params
+                                                             print (priorZero,alpha)
                                                              let lkl = logLikelihood optTree
                                                              writeFile (jobName ++ "-out.tre") (show optTree)
                                                              writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
@@ -132,8 +145,14 @@ main = do args <- getArgs
                                                              return $ Just $ "Gamma: " ++ (show alpha) ++ " " ++ (show lkl) where
                                                                  t2 = structDataN 1.0 1 AminoAcid (pAlignment a) t
                                                                  piF = fromList $ safeScaledAAFrequencies a
-                                                                 model = gammaModel cats wagSX $ piX piF
-                                                                 progress = optParamsAndBLIO model t2 [alpha'] (flatPriors cats) [Just 0.001] [Nothing] 0.01
+                                                                 model = case doZeroGamma of 
+                                                                        False -> gammaModel cats wagSX $ piX piF
+                                                                        True  -> zeroGammaModel cats wagSX $ piX piF 
+                                                                 progress = optParamsAndBLIO model t2 initParams (flatPriors cats) lBound uBound 0.01
+                                                                 (initParams,lBound,uBound) = case doZeroGamma of 
+                                                                     True -> ([priorZero',alpha'],[Just 0.0,Just 0.001],[Just 0.99,Nothing])
+                                                                     False -> ([alpha'],[Just 0.001],[Nothing])
+
                 (Just a,Right t,Just sigma') -> do 
                         let scaleT = 1e300
                         let (scale,priorScale) = getScales t scaleT

@@ -6,7 +6,7 @@ module Phylo.Likelihood (optBSParamsBL,pAlignment,lAlignment,logLikelihood,
        ,getLeftSplit,leftSplit,cachedBranchModelTree,makeSimulatedAlignment,getAllF,makeMapping,makeSimulatedAlignmentWithGaps,Phylo.Likelihood.columns,genList
        ,addModelNNode,removeModel,quickThmm,quickGamma,thmmPerBranchModel,annotateTreeWithNumberSwitches,annotateTreeWithNumberSwitchesSigma
        ,jcF,gtrF,gtrS,wagF,jttF,hkyF,hkyS,dataSize,customF,getSensibleParams,SPiFunctionTuple,zeroParam,piByLog
-       ,simpleModel,getSubBL,nthRootApprox,nthRoot,
+       ,simpleModel,getSubBL,nthRootApprox,nthRoot,zeroGammaModel,
        quickLkl,toPBEQ,setBLX',toPBESplits,getFuncT1A,optWithBSIO',dummyTree,posteriorTipsCSV,restructDataMapped,setBLMapped,whichModels,likelihoods,quickGamma') where
 import Phylo.Alignment
 import Phylo.Tree
@@ -785,14 +785,15 @@ gammaModel numCat (sF,sN) (piF,piN) (alpha:xs) = (models,replicate numCat pi) wh
                                 s = sF (take sN xs)
                                 pi = piF (take piN (drop sN xs))
 
-zeroGammaModel numCat (sF,sN) (piF,piN) (priorZero:xs) = case priorZero of 
+zeroGammaModel numCat (sF,sN) (piF,piN) (priorZero:xs) = trace "ZERO MODEL" $ case priorZero of 
                                                 a | a > 0.0   -> zeroGammaModel' numCat (sF,sN) (piF,piN) (priorZero:xs)
                                                   | otherwise -> gammaModel numCat (sF,sN) (piF,piN) xs
 
-zeroGammaModel' numCat (sF,sN) (piF,piN) (priorZero:xs) = (models,replicate (numCat+1) pi) where
-                                (models',_) = gammaModel numCat (sF,sN) (piF,piN) xs
+zeroGammaModel' numCat (sF,sN) (piF,piN) (priorZero:alpha:xs) = (models,replicate (numCat+1) pi) where
+                                (models',_) = gammaModel numCat (sF,sN) (piF,piN) (alpha:xs)
                                 models = zeroMod:models'  
-                                zeroMod= (\x -> (zeroQMat piN,zeroQMat piN))
+                                zeroMod = traceShow zeroMat $ (\x -> (zeroMat,zeroMat))
+                                zeroMat = diag $ constant 1.0 $ dim pi
                                 s = sF (take sN xs)
                                 pi = piF (take piN (drop sN xs))
 
