@@ -333,17 +333,17 @@ main = do args <- getArgs
                                            Basic -> (simpleModel sMat pi,extraParams,optSimpleModel method pi sMat extraLowerParams extraUpperParams)
                                            Ras a -> (gammaModel cats sMat pi,(a:extraParams), optGammaModel method cats pi sMat extraLowerParams extraUpperParams)
                                            Thmm a b c -> (thmmModel (cats+1) sMat pi,(a:b:c:extraParams), optThmmModel method 1 cats pi sMat extraLowerParams extraUpperParams)
-          let (t2',priors,nClasses) = case modelParams of 
-                                           Basic -> (addModelFx (structDataN 1.0 1 dataType pAln t) (modelF initparams) [1.0],[1.0],1)
-                                           Thmm _ _ _ -> (addModelFx (structDataN 1.0 (cats+1) dataType (pAln) t) (modelF initparams) [1.0],[1.0],(cats+1))
-                                           Ras _ -> (addModelFx (structDataN 1.0 1 dataType (pAln) t) (modelF initparams) (flatPriors cats),flatPriors cats,1)
+          let (t2',(_,_,priors),nClasses) = case modelParams of 
+                                           Basic -> (addModelFx (structDataN 1.0 1 dataType pAln t) (modelF initparams),modelF initparams,1)
+                                           Thmm _ _ _ -> (addModelFx (structDataN 1.0 (cats+1) dataType (pAln) t) (modelF initparams),modelF initparams,(cats+1))
+                                           Ras _ -> (addModelFx (structDataN 1.0 1 dataType (pAln) t) (modelF initparams),modelF initparams,1)
           logger $ show (intraLMat nClasses alphabetSize)
           case simulateOnly of 
                         Just alnLength -> do let emptyAlignment = quickListAlignment (Phylo.Tree.names t) [] 
                                              let emptyTree= case modelParams of 
-                                                                   Basic      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
-                                                                   Thmm a b c -> addModelFx (structDataN 1.0 (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) [1.0]
-                                                                   Ras a      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) (flatPriors cats)
+                                                                   Basic      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) 
+                                                                   Thmm a b c -> addModelFx (structDataN 1.0 (cats+1) dataType (pAlignment emptyAlignment) t) (modelF initparams) 
+                                                                   Ras a      -> addModelFx (structDataN 1.0 1 dataType (pAlignment emptyAlignment) t) (modelF initparams) 
                                              mapM putStr $ toFasta $ makeSimulatedAlignment dataType stdGen (cachedBranchModelTree emptyTree) alnLength 
                                              exitSuccess
                         Nothing        -> return ()
@@ -396,7 +396,7 @@ main = do args <- getArgs
                            writeFile ("prior " ++ fname) $ annotatedSplits (map (\(a,b,c,d,e) -> d) $ getPartialBranchEnds t2) $ map (\x-> [x]) $ snd st
           let stdGens = take (numSim) $ genList stdGen
           let alnLength = length $ Phylo.Likelihood.columns pAln
-          let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) priors x dataType nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
+          let (simTrees,simAlignments) = unzip $ ((map (\x-> newSimulation a t t2 (modelF params) x dataType nClasses alnLength) stdGens) `using` parBuffer 3 rdeepseq)
           let simulations' = case (optBoot,optMethod) of 
                                  (FullOpt level,_) -> (map (\(a,b,c) -> debugtrace ("Params " ++ (show b) ++ "\n" ++ "BL " ++ (show $ getBL a)) a) $ map (\x->last $ optF tol x initparams) $ trees,alignments)
                                  (BranchOpt,_) -> (map optBLDFull0 trees,alignments)
@@ -765,17 +765,17 @@ allInDynamic' :: [String] -> [String] -> [String] -> Bool
 allInDynamic' l r ("@":set) = allInNoRoot' l r set                                                                                                                                                                                            
 allInDynamic' l r set = allIn' l r set                                                                                                                                                                                                        
                                                                                                                                                                                                                                               
-optSimpleModel method pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate (length lower) 0.1) lower upper [1.0] (simpleModel s pi) 
+optSimpleModel method pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate (length lower) 0.1) lower upper (simpleModel s pi) 
 
-optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate ((length lower)+1) 0.1) ((Just 0.01):lower) ((Just 100.0):upper) (flatPriors cats) model where                                                           
+optGammaModel method cats pi s lower upper cutoff = optBSParamsBL cutoff method (0,0) (\x->0) (replicate ((length lower)+1) 0.1) ((Just 0.01):lower) ((Just 100.0):upper) model where                                                           
         model = gammaModel cats s pi
                                 
-optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper [1.0] myModel t2 params where
+optThmmModel method numModels cats pi s lower' upper' cutoff t2 params = optBSParamsBL cutoff method (0,numModels) (makeMapping (allIn []) t2) (map (\x->0.01) lower) lower upper myModel t2 params where
         lower = [Just 0.01,Just 0.1,Just 0.01] ++ lower'                                                                                                       
         upper = [Just 0.99,Just 200.0,Just 500.0] ++ upper'                                                                                                           
         myModel = thmmModel (cats+1) s pi
 
-newSimulation origAln origTree tree model priors stdGen dataType classes len = (addModelFx (structDataN 1.0 classes dataType (pAln) origTree) model priors,pAln) where
+newSimulation origAln origTree tree model stdGen dataType classes len = (addModelFx (structDataN 1.0 classes dataType (pAln) origTree) model,pAln) where
         aln = makeSimulatedAlignmentWithGaps dataType stdGen tree origAln
         pAln = sane $ pAlignment aln
 

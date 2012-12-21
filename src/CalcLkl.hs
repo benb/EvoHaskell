@@ -111,7 +111,6 @@ main = do args <- getArgs
           let (priorZero',doZeroGamma) = case priorZero'' of  
                 Nothing -> (0.05,False)
                 Just x  -> (x,True)
-          print (priorZero',doZeroGamma)
           aln <- case alnMaybe of
                 Just a  -> parseAlignmentFile parseUniversal a
                 Nothing -> do putStrLn "Please specify an alignment"
@@ -129,50 +128,51 @@ main = do args <- getArgs
                               printHelpError opts
           output <- case (aln,tree,sigmaMaybe) of 
                 (Just a,Right t,Nothing) ->               do let shouldOpt = optFlag
-                                                             print shouldOpt
                                                              (optTree,params) <- case shouldOpt of 
                                                                                        True ->   optWithOutput progress
-                                                                                       False ->  return (addModelNNode t2 m' (flatPriors cats) pi',initParams) where
-                                                                                                     (m',pi') = model initParams
+                                                                                       False ->  return (addModelNNode t2 m' pri pi',initParams) where
+                                                                                                     (m',pi',pri) = model initParams
                                                              let [priorZero,alpha] = case doZeroGamma of
                                                                         False -> [0.0,(head params)]
                                                                         True  -> params
-                                                             print (priorZero,alpha)
                                                              let lkl = logLikelihood optTree
                                                              writeFile (jobName ++ "-out.tre") (show optTree)
-                                                             writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
                                                              writeFile (jobName ++ "-out.lkl") ((show lkl) ++ "\n")
-                                                             return $ Just $ "Gamma: " ++ (show alpha) ++ " " ++ (show lkl) where
+                                                             case doZeroGamma of
+                                                                        False -> do writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\n")
+                                                                        True -> writeFile (jobName ++ "-out.param") ("alpha = " ++ (show alpha) ++ "\npriorZero = " ++ (show priorZero) ++ "\n")
+                                                             return $ Just $ "Gamma: " ++ (show alpha) ++ " priorZero: " ++ (show priorZero) ++ " " ++ (show lkl) where
                                                                  t2 = structDataN 1.0 1 AminoAcid (pAlignment a) t
                                                                  piF = fromList $ safeScaledAAFrequencies a
                                                                  model = case doZeroGamma of 
                                                                         False -> gammaModel cats wagSX $ piX piF
                                                                         True  -> zeroGammaModel cats wagSX $ piX piF 
-                                                                 progress = optParamsAndBLIO model t2 initParams (flatPriors cats) lBound uBound 0.01
+                                                                 progress = optParamsAndBLIO model t2 initParams lBound uBound 0.01
                                                                  (initParams,lBound,uBound) = case doZeroGamma of 
                                                                      True -> ([priorZero',alpha'],[Just 0.0,Just 0.001],[Just 0.99,Nothing])
                                                                      False -> ([alpha'],[Just 0.001],[Nothing])
 
                 (Just a,Right t,Just sigma') -> do 
-                        let scaleT = 1e300
+                        --let scaleT = 1e300
+                        let scaleT = 1
                         let (scale,priorScale) = getScales t scaleT
-                        let priors = [1.0/priorScale]
+                        let priors = [1.0]
                         let t2 = structDataN scale (cats+1) AminoAcid (pAlignment a) t                                                                                                             
                         let piF = fromList $ normalise $ map (\x-> if x < 1e-15 then 1e-15 else x) $ safeScaledAAFrequencies a
                         let (numBSParams,mapping) = case mappingMaybe of
                                 Nothing -> ((0,0),Nothing)
                                 Just s  -> getMapping t2 s
                         let model = thmmModel (cats+1) wagSX (piX piF)
-                        let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] priors [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
+                        let progress = optBSParamsAndBLIO (0,0) Nothing model t2 [priorZero',alpha',sigma'] [Just 0.01,Just 0.001, Just 0.00] [Just 0.99,Just 100.0,Just 10000.0] 0.01
                         let shouldOpt = numBSParams /= (0,0) || optFlag --always opt if numBSParams /= 0
                         (optTree',[priorZero,alpha,sigma]) <- case shouldOpt of 
                                                                 True -> optWithOutput progress
                                                                 False -> return (addModelNNode t2 m' priors pi',[priorZero',alpha',sigma']) where
-                                                                           (m',pi') = model [priorZero',alpha',sigma']
+                                                                           (m',pi',_) = model [priorZero',alpha',sigma']
                         ans <- case (numBSParams,optAllSwitch) of
                              (_,True) -> do --every branch has a sigma
                                 let model = thmmPerBranchModel (cats+1) wagS piF
-                                let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] priors [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
+                                let progress = trace ("Per Branch! " ) $ optBSParamsAndBLIO numBSParams mapping model (annotateTreeWith' (\x->sigma) optTree') [priorZero,alpha] [Just 0.01,Just 0.001] [Just 0.99,Just 100.0] 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let optTree = annotateTreeWithNumberSwitches priorScale AminoAcid optTree2
                                 writeFile (jobName ++ "-out.tre") $ (show $ getSubBL 0 optTree) ++ "\n"
@@ -194,7 +194,7 @@ main = do args <- getArgs
                              (_,False) -> do  --hybrid
                                 let model = thmmPerBranchModel (cats+1) wagS piF
                                 let (a,b) = numBSParams
-                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) priors ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
+                                let progress = trace ("Per Branch! " ++ (show [a,b])) $ optBSParamsAndBLIO numBSParams mapping model optTree' ((replicate (a*b) sigma)  ++ [priorZero,alpha]) ((replicate (a*b) $ Just 0.00) ++ [Just 0.01,Just 0.001]) ((replicate (a*b) $ Just 10000.0) ++ [Just 0.99,Just 100.0]) 0.01
                                 (optTree2,multiParams) <- optWithOutput progress
                                 let (alpha:priorZero:sigmas) = reverse multiParams 
                                 {- sigmas is now reversed
@@ -392,7 +392,7 @@ normalise list = map ( / total) list where
                  total = foldl' (+) 0.0 list
 
 safeScaledAAFrequencies = normalise . map (\x-> if x < 1e-15 then 1e-15 else x) . scaledAAFrequencies
-optBSParamsAndBLIO numBSParam mapping model tree params priors lower upper cutoff = optWithBSIO' bobyqa [] cutoff numBSParam mapping (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper priors model (dummyTree tree) params                                                            
+optBSParamsAndBLIO numBSParam mapping model tree params lower upper cutoff = optWithBSIO' bobyqa [] cutoff numBSParam mapping (map (\x->0.01) lower) (map (\x->1E-4) lower) lower upper model (dummyTree tree) params 
 optParamsAndBLIO = optBSParamsAndBLIO (0,0) Nothing
 trim = f . f where 
    f = reverse . dropWhile isSpace
