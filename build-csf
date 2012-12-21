@@ -1,0 +1,1 @@
+cabal install --ghc-options="-rtsopts" --extra-include-dirs=$HOME/local/include --ghc-options="-L/users09/mqbssbb7/local/lib -L/users09/mqbssbb7/OpenBLAS-generic/lib -lnlopt -lopenblas"  -O2
